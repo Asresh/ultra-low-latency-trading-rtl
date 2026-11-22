@@ -1,0 +1,28 @@
+name: RTL verification
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          version: '2026-11-22'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Simulate, synthesize and route
+        run: |
+          make -j2 test
+          make -j2 synth
+          make -j2 route | tee build/timing-summary.md
+        shell: bash
+      - name: Publish timing summary
+        run: cat build/timing-summary.md >> "$GITHUB_STEP_SUMMARY"

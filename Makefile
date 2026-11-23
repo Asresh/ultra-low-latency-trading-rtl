@@ -1,73 +1,66 @@
+PYTHON ?= python3
 IVERILOG ?= iverilog
 VVP ?= vvp
 YOSYS ?= yosys
 NEXTPNR ?= nextpnr-ecp5
+SBY ?= sby
 FREQ ?= 100
-SEED ?= 1
+SEEDS ?= 1
+ROUTE_JOBS ?= 1
 
-FEED := projects/01-market-data
-BOOK := projects/02-matching-engine
-RISK := projects/03-risk-gateway
-BOOK_RTL := $(BOOK)/rtl/price_priority.sv $(BOOK)/rtl/price_time_matcher.sv
-RISK_RTL := $(RISK)/rtl/pretrade_risk_gateway.sv
-FEED_RTL := $(FEED)/rtl/itch_decode.sv
-ROUTE_DIR := build/ecp5
+FEED := day01-redundant_market_data
+BOOK := day02-banked_matching_engine
+RISK := day03-order_risk_gateway
+PROJECTS := $(FEED) $(BOOK) $(RISK)
+HDL_HEADERS := $(wildcard $(BOOK)/*.svh $(RISK)/*.svh)
+BOOK_RTL = $(addprefix $(BOOK)/,$(shell sed -e 's/\#.*//' $(BOOK)/rtl.f))
+RISK_RTL = $(addprefix $(RISK)/,$(shell sed -e 's/\#.*//' $(RISK)/rtl.f))
 
-.PHONY: all test test-feed test-book test-risk demo synth synth-feed synth-book synth-risk route clean
+.PHONY: all verify test lint synth formal inventory route demo netlist-check clean
 all: test
+verify: inventory test lint synth formal netlist-check
 
-test: test-feed test-book test-risk demo
+define project_targets
+.PHONY: test-$(1) lint-$(1) synth-$(1) clean-$(1)
+test: test-$(1)
+test-$(1):
+	$$(MAKE) -C $(1) $(if $(filter $(1),$(FEED) $(BOOK)),regress,test)
+lint: lint-$(1)
+lint-$(1):
+	$$(MAKE) -C $(1) lint
+synth: synth-$(1)
+synth-$(1):
+	$$(MAKE) -C $(1) synth YOSYS="$$(YOSYS)"
+clean: clean-$(1)
+clean-$(1):
+	$$(MAKE) -C $(1) clean
+endef
 
-test-feed:
-	$(MAKE) -C $(FEED) test SEED=7201
-	$(MAKE) -C $(FEED) test SEED=39119
+$(foreach project,$(PROJECTS),$(eval $(call project_targets,$(project))))
 
-test-book:
-	$(MAKE) -C $(BOOK) test
+test: demo
 
-test-risk:
-	$(MAKE) -C $(RISK) test
+inventory:
+	$(PYTHON) scripts/source_inventory.py --minimum 2000
 
-demo: build/risk_to_matcher.vvp
+route:
+	$(PYTHON) scripts/characterize_fpga.py --yosys "$(YOSYS)" --nextpnr "$(NEXTPNR)" --frequency $(FREQ) --seeds $(SEEDS) --jobs $(ROUTE_JOBS)
+
+formal:
+	mkdir -p $(BOOK)/build $(RISK)/build
+	cd $(BOOK)/formal && $(SBY) -f --prefix ../build/fifo fifo.sby prove cover
+	cd $(BOOK)/formal && $(SBY) -f --prefix ../build/arbiter arbiter.sby prove cover
+	cd $(RISK)/formal && $(SBY) -f --prefix ../build/gateway gateway.sby bmc cover
+
+netlist-check:
+	$(MAKE) -C $(RISK) test-gate YOSYS="$(YOSYS)"
+
+demo: build/risk_match_lifecycle.vvp
 	$(VVP) $<
 
-build/risk_to_matcher.vvp: $(BOOK_RTL) $(RISK_RTL) demo/risk_to_matcher_tb.sv
+build/risk_match_lifecycle.vvp: demo/tb_risk_match_lifecycle.sv $(BOOK_RTL) $(RISK_RTL) $(HDL_HEADERS)
 	mkdir -p build
-	$(IVERILOG) -g2012 -s risk_to_matcher_tb -o $@ $^
-
-synth: synth-feed synth-book synth-risk
-
-synth-feed:
-	$(MAKE) -C $(FEED) synth YOSYS="$(YOSYS)"
-
-synth-book:
-	$(MAKE) -C $(BOOK) synth YOSYS="$(YOSYS)"
-
-synth-risk:
-	$(MAKE) -C $(RISK) synth YOSYS="$(YOSYS)"
-
-route: $(ROUTE_DIR)/itch_decode.timing.json $(ROUTE_DIR)/price_time_matcher.timing.json $(ROUTE_DIR)/pretrade_risk_gateway.timing.json
-	python3 scripts/summarize_timing.py $^
-
-$(ROUTE_DIR):
-	mkdir -p $@
-
-$(ROUTE_DIR)/itch_decode.mapped.json: $(FEED_RTL) Makefile | $(ROUTE_DIR)
-	$(YOSYS) -ql $(ROUTE_DIR)/itch_decode.yosys.log -p 'read_verilog -sv $(FEED_RTL); synth_ecp5 -top itch_decode -json $@; check -assert'
-
-$(ROUTE_DIR)/price_time_matcher.mapped.json: $(BOOK_RTL) Makefile | $(ROUTE_DIR)
-	$(YOSYS) -ql $(ROUTE_DIR)/price_time_matcher.yosys.log -p 'read_verilog -sv $(BOOK_RTL); synth_ecp5 -top price_time_matcher -json $@; check -assert'
-
-$(ROUTE_DIR)/pretrade_risk_gateway.mapped.json: $(RISK_RTL) Makefile | $(ROUTE_DIR)
-	$(YOSYS) -ql $(ROUTE_DIR)/pretrade_risk_gateway.yosys.log -p 'read_verilog -sv $(RISK_RTL); synth_ecp5 -top pretrade_risk_gateway -json $@; check -assert'
-
-# Always reroute so that FREQ and SEED on the command line take effect.
-.PHONY: FORCE
-$(ROUTE_DIR)/%.timing.json: $(ROUTE_DIR)/%.mapped.json FORCE
-	$(NEXTPNR) --85k --package CABGA381 --speed 8 --out-of-context --threads 1 --freq $(FREQ) --seed $(SEED) --timing-allow-fail --json $< --report $@ --log $(ROUTE_DIR)/$*.nextpnr.log -q
+	$(IVERILOG) -g2012 -I $(BOOK) -I $(RISK) -s tb_risk_match_lifecycle -o $@ $(BOOK_RTL) $(RISK_RTL) $<
 
 clean:
-	$(MAKE) -C $(FEED) clean
-	$(MAKE) -C $(BOOK) clean
-	$(MAKE) -C $(RISK) clean
 	rm -rf build

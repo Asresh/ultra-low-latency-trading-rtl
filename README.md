@@ -1,42 +1,34 @@
 # Ultra Low Latency Trading RTL
 
-Three original SystemVerilog designs for latency-sensitive trading hardware. Each project includes synthesizable RTL, an interface specification, and a self-checking simulation. The repository also includes a shared FPGA timing flow and a risk-to-matcher simulation.
+Three independent FPGA hardware projects in the [RTL Projects Everyday](https://github.com/Asresh/RTL-Projects-Everyday) format. Each day folder puts the synthesizable SystemVerilog, self-checking verification, Makefile, and design README together. The designs contain 6,816 source lines across RTL, testbenches, models and host tools.
 
-| Project | Design | Unstalled behavior |
+| Day | Project | Design problem |
 | --- | --- | --- |
-| [01 · Nasdaq ITCH market data](projects/01-market-data) | Decode seven TotalView-ITCH 5.0 order lifecycle messages from a 64-bit byte stream. Check framing and message sequence, then queue typed events and diagnostics. | One input beat per clock with capacity. An empty result queue can transfer the result on the rising edge after the final beat. |
-| [02 · Price-time matching engine](projects/02-matching-engine) | Maintain a bounded bid and ask book with per-price FIFO order, direct ID cancels, and partial and multi-order fills. | One cycle from command transfer to the first event, then one event per cycle during an unstalled sweep. |
-| [03 · Pre-trade risk gateway](projects/03-risk-gateway) | Enforce configurable instrument, price, size, notional and side credit limits with ordered reservations and a latched emergency halt. | One request per clock. Accept at edge `n`, present the decision after `n+2`, and transfer it on `n+3` with a ready sink. |
+| 01 | [Redundant MoldUDP64 / ITCH market data](day01-redundant_market_data/) | Reconstruct one ordered stream from two unreliable copies of the feed. Validate complete datagrams before exposing messages, suppress duplicates, and request missing sequence ranges. |
+| 02 | [Banked price-time matching engine](day02-banked_matching_engine/) | Process instruments independently while preserving order and price-time priority within each book. Decide whether an order crosses, rests, expires, is rejected, or amends existing quantity. |
+| 03 | [Order risk and execution reconciliation](day03-order_risk_gateway/) | Reserve per-account and per-instrument credit, then reconcile fills, cancellations, rejects and amendments in order. Prevent stale events from modifying a reused order slot. |
 
-## Try it
+## Run and inspect
 
-Run from the repository root. The simulators use Icarus Verilog and Python 3. Mapping uses Yosys. Routing additionally uses nextpnr with ECP5 support.
+Use Icarus Verilog, Python 3 and GNU Make for simulation. Install the [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) for Verilator, Yosys and nextpnr.
 
 ```sh
-make test      # Three scoreboards and the integration test
-make synth     # Default-parameter generic synthesis and structural checks
-make route     # ECP5 mapping, out-of-context route, timing and utilization summary
-make demo      # Risk decisions and exchange-side matching under backpressure
+make test        # All scoreboard regressions and the risk/matcher lifecycle
+make lint        # RTL and tops checked per project
+make synth       # Generic synthesis and structural checks
+make formal      # FIFO/arbiter proofs and a bounded risk-ledger property check
+make netlist-check # Compare a synthesized gateway against the transaction oracle
+make route       # ECP5 clock and resource characterization
+make inventory   # Reproducible source line counts
 ```
 
-Override `YOSYS` and `NEXTPNR` with executable paths if needed. The [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) provides both. Simulation does not require an FPGA board or exchange data.
+To run a single project, change into its day folder and run `make test`. See the corresponding README for waveforms, parameter limits, interface fields and golden-model checks.
 
-## System boundary
+## Design evidence
 
-```mermaid
-flowchart LR
-    Feed["Message-aligned Nasdaq ITCH bytes"] --> Decoder["01 · ITCH decoder"]
-    Decoder --> Consumer["Decoded market events and sequence status"]
-    Orders["Synthetic order requests"] --> Risk["03 · Risk gateway"]
-    Risk -->|Approved orders| Matcher["02 · Exchange matching engine"]
-    Risk -->|Rejected orders| Audit["Decision scoreboard"]
-    Matcher --> Events["Rest and fill events"]
-```
+- [System boundaries and integration](docs/system-boundaries.md) shows how a market receiver, exchange book and trading-side risk ledger participate in different parts of the system.
+- [Performance and verification](docs/performance.md) records the measured configurations, cycle behavior, tool versions, timing results and source line counts.
+- [FPGA trading role alignment](docs/role-alignment.md) connects RTL, networking, verification, and timing decisions to roles at Optiver, Citadel Securities, Jane Street, IMC and DRW.
+- [Research notes](docs/research.md) summarize 30 papers and preprints and link primary protocol and design references.
 
-The decoder is a market-data subscriber. The matcher represents an exchange-side book that processes new orders and cancels. The integration runs the risk gate and matcher using synthetic orders on a single clock and checks that rejected orders cannot reach the book. The RTL boundary starts at framed feed data or normalized orders. A physical deployment would require transport, clock and reset integration, and implementation for the chosen board or ASIC process.
-
-## Evidence
-
-- [Performance and reproducibility](docs/performance.md) documents cycle definitions, simulation counts, routed frequency and resource use for a shared ECP5 configuration.
-- [Research notes](docs/research.md) summarize 30 papers and preprints and link design decisions to primary sources and the Nasdaq specification.
-- [Role alignment](docs/role-alignment.md) connects the work to FPGA and ASIC role requirements from Citadel Securities, Optiver, and Jane Street.
+The timing reports characterize RTL cores in isolation. Physical interfaces, board bring-up and exchange connectivity fall outside the reference flow.

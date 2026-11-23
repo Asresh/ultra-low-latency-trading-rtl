@@ -11,18 +11,33 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: YosysHQ/setup-oss-cad-suite@v4
         with:
           version: '2026-11-22'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Simulate, synthesize and route
+      - name: Verify source inventory and regressions
         run: |
-          make -j2 test
-          make -j2 synth
-          make -j2 route | tee build/timing-summary.md
-        shell: bash
-      - name: Publish timing summary
-        run: cat build/timing-summary.md >> "$GITHUB_STEP_SUMMARY"
+          make inventory >> "$GITHUB_STEP_SUMMARY"
+          make -j3 test
+          make -j3 lint
+      - name: Synthesize and prove
+        run: |
+          make -j3 synth
+          make formal
+          make netlist-check
+      - name: Route cores and publish measurements
+        run: |
+          make route ROUTE_JOBS=2
+          cat build/characterization/result.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-timing
+          path: |
+            build/characterization/result.*
+            day*/build/characterization/*.report.json
+            day*/build/characterization/*.log
+          if-no-files-found: ignore

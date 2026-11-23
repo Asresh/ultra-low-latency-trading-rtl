@@ -1,0 +1,12 @@
+latency_reset_sync.sv
+latency_timebase.sv
+latency_async_fifo.sv
+latency_probe.sv
+latency_rr.sv
+latency_correlator.sv
+latency_histogram.sv
+latency_axil.sv
+latency_trace.sv
+latency_registers.sv
+latency_counter_bank.sv
+multiclock_latency_telemetry.sv

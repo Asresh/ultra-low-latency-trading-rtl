@@ -1,0 +1,27 @@
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 18
+cover: mode cover
+cover: depth 16
+
+[engines]
+prove: abc pdr
+cover: smtbmc boolector
+
+[script]
+read -formal -sv quote_publication.sv quote_publication_pipeline.sv formal_publication.sv
+prep -top formal_publication -flatten
+memory_map
+techmap
+opt
+setundef -undriven -anyseq
+opt_clean
+
+[files]
+../quote_publication.sv
+../quote_publication_pipeline.sv
+formal_publication.sv

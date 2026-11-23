@@ -11,7 +11,14 @@ ROUTE_JOBS ?= 1
 FEED := day01-redundant_market_data
 BOOK := day02-banked_matching_engine
 RISK := day03-order_risk_gateway
-PROJECTS := $(FEED) $(BOOK) $(RISK)
+ETHERNET := day04-ethernet_udp_frontend
+MBO := day05-market_state_quote_engine
+LATENCY := day06-multiclock_latency_telemetry
+OUCH := day07-ouch_order_session
+DMA := day08-host_dma_queues
+LEGACY := $(FEED) $(BOOK) $(RISK)
+EXPANSION := $(ETHERNET) $(MBO) $(LATENCY) $(OUCH) $(DMA)
+PROJECTS ?= $(LEGACY) $(EXPANSION)
 HDL_HEADERS := $(wildcard $(BOOK)/*.svh $(RISK)/*.svh)
 BOOK_RTL = $(addprefix $(BOOK)/,$(shell sed -e 's/\#.*//' $(BOOK)/rtl.f))
 RISK_RTL = $(addprefix $(RISK)/,$(shell sed -e 's/\#.*//' $(RISK)/rtl.f))
@@ -24,7 +31,7 @@ define project_targets
 .PHONY: test-$(1) lint-$(1) synth-$(1) clean-$(1)
 test: test-$(1)
 test-$(1):
-	$$(MAKE) -C $(1) $(if $(filter $(1),$(FEED) $(BOOK)),regress,test)
+	$$(MAKE) -C $(1) $(if $(filter $(1),$(FEED) $(BOOK) $(MBO)),regress,test)
 lint: lint-$(1)
 lint-$(1):
 	$$(MAKE) -C $(1) lint
@@ -41,7 +48,7 @@ $(foreach project,$(PROJECTS),$(eval $(call project_targets,$(project))))
 test: demo
 
 inventory:
-	$(PYTHON) scripts/source_inventory.py --minimum 2000
+	$(PYTHON) scripts/source_inventory.py --enforce
 
 route:
 	$(PYTHON) scripts/characterize_fpga.py --yosys "$(YOSYS)" --nextpnr "$(NEXTPNR)" --frequency $(FREQ) --seeds $(SEEDS) --jobs $(ROUTE_JOBS)
@@ -51,6 +58,7 @@ formal:
 	cd $(BOOK)/formal && $(SBY) -f --prefix ../build/fifo fifo.sby prove cover
 	cd $(BOOK)/formal && $(SBY) -f --prefix ../build/arbiter arbiter.sby prove cover
 	cd $(RISK)/formal && $(SBY) -f --prefix ../build/gateway gateway.sby bmc cover
+	$(MAKE) -C $(MBO) formal SBY="$(SBY)"
 
 netlist-check:
 	$(MAKE) -C $(RISK) test-gate YOSYS="$(YOSYS)"

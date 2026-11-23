@@ -1,6 +1,6 @@
 # How the portfolio maps to FPGA trading roles
 
-Posting requirements were reviewed on November 23, 2026. Project evidence is linked from the root README.
+This review uses representative public trading-firm postings and engineering pages reviewed on November 23, 2026. The links identify the source for the relevant work even after postings close.
 
 | Firm and role | Role requirements | What to read or demonstrate |
 | --- | --- | --- |
@@ -9,6 +9,18 @@ Posting requirements were reviewed on November 23, 2026. Project evidence is lin
 | Jane Street Hardware Engineer, FPGA/ASIC | Hardware design from scratch, software-supported design and testing, FPGA or ASIC flows, and an interest in networking. The team uses Hardcaml. | Explain what the software reference model independently checks, trace a stalled transaction through the hardware, and inspect synthesis and route results. The portfolio implementation is SystemVerilog. [Role](https://www.janestreet.com/join-jane-street/position/8651405002/) |
 | IMC Hardware Engineer | FPGA development for electronic trading, system design, testing, and close software collaboration | Describe the boundary between a transport session and FPGA state, and use the transaction demo to reconcile a partial execution using two sides' order handles. [Role](https://www.imc.com/us/careers/jobs/4987749101) |
 | DRW FPGA Engineer (Algo) | FPGA designs for automated trading, electronic trading performance, and debugging in an engineering team | Present the exact transaction timeline and latency under backpressure, fault injection for stale input, and the measured routing bottleneck. [Role](https://www.drw.com/work-at-drw/listings/fpga-engineer-algo-3170998) |
+
+## Days 04–08
+
+| Project | Requirements from the roles | Evidence to show in a design review |
+| --- | --- | --- |
+| [04 · Ethernet / IPv4 / UDP](../day04-ethernet_udp_frontend/) | Optiver asks for high-speed networking and experience designing to latency, bandwidth and area constraints. Its graduate role also covers network infrastructure and low-level links. [Optiver FPGA Engineer](https://prod-www.optiver.com/join-us/jobs/technology/chicago/fpga-engineer/), [Optiver Graduate FPGA Engineer](https://prod-www.optiver.com/join-us/jobs/technology/amsterdam/graduate-fpga-engineer-2027-start/) | Use PCAPng replay and a malformed VLAN/IP/UDP matrix to explain why the design commits a full packet only after validation. Show the measured RX and TX cycle counts and how lookup, banking and backpressure limit bandwidth. |
+| [05 · Market state and quote intents](../day05-market_state_quote_engine/) | Citadel Securities asks for latency-sensitive FPGA architecture, RTL and verification. DRW's algorithmic FPGA role connects hardware design with the performance of automated trading. [Citadel Securities FPGA Engineer](https://www.citadelsecurities.com/careers/details/fpga-engineer/), [DRW FPGA Engineer](https://www.drw.com/work-at-drw/listings/fpga-engineer-algo-3170998) | Walk an order update through the book and quote datapath. Show a recovery snapshot and explain the freshness fence, then inspect the routes that limit a one-cycle command interface to 44.73 MHz on the characterized build. |
+| [06 · Latency telemetry](../day06-multiclock_latency_telemetry/) | Optiver explicitly names precision timestamping and performance benchmarking in its FPGA internship work. IMC describes system design, FPGA testing and close hardware/software collaboration. [Optiver Technology Internships](https://prod-www.optiver.com/join-us/students/internships/technology/), [IMC Hardware Engineer](https://www.imc.com/us/careers/jobs/4987749101) | Identify the timestamp acceptance edge in each clock domain. Show asynchronous probe bursts, counter rollover and epoch fencing. Compare the Python reconstruction against RTL capture and distinguish cycle results from physical measurement uncertainty. |
+| [07 · OUCH and SoupBinTCP](../day07-ouch_order_session/) | Jane Street asks for hardware design from scratch and values networking interest and software testing. Optiver's work includes custom protocols and low-level network integration. [Jane Street FPGA/ASIC Hardware Engineer](https://www.janestreet.com/join-jane-street/position/8651405002/), [Optiver Technology Internships](https://prod-www.optiver.com/join-us/students/internships/technology/) | Interrupt a framed message and reconnect with an overlapping replay. Show the difference between transport progress and committed exchange sequence using the journal and the byte-exact scoreboard. |
+| [08 · Host/FPGA DMA](../day08-host_dma_queues/) | Optiver calls out FPGA integration with server hardware. Citadel Securities and IMC list integration and validation alongside RTL design. [Optiver Graduate FPGA Engineer](https://prod-www.optiver.com/join-us/jobs/technology/amsterdam/graduate-fpga-engineer-2027-start/), [Citadel Securities FPGA Engineer](https://www.citadelsecurities.com/careers/details/fpga-engineer/), [IMC Hardware Engineer](https://www.imc.com/us/careers/jobs/4987749101) | Explain how software publishes an SQ entry and the FPGA retires it only after CQ writeback. Show the 4 KiB split, per-queue credits, intentional B-channel stall and byte-level host audit. |
+
+Tower Research and Jump Trading also describe infrastructure work spanning hardware, networking and software. Their engineering pages give context about these interfaces. [Tower Research Engineering](https://tower-research.com/engineering/), [Jump Trading Technology](https://www.jumptrading.com/technology)
 
 ## Design review prompts
 
@@ -19,3 +31,4 @@ Posting requirements were reviewed on November 23, 2026. Project evidence is lin
 5. Why is a reservation valued at the limit price while a fill uses execution price? What prevents a duplicate execution or a fill for a reused order ID from changing risk?
 6. Where does the latency measurement start and stop? Explain the difference between a cycle count, post-route clock frequency and a NIC-to-wire measurement.
 7. Which data structures dominate routing and area? What would have to change for a deeper order book or for more concurrent data channels?
+8. Which event lets the host reuse an SQ slot, and what recovery information remains if the corresponding CQ write fails after the packet has left the FPGA?

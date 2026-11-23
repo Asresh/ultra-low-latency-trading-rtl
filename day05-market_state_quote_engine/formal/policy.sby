@@ -1,0 +1,21 @@
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 2
+cover: mode cover
+cover: depth 2
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -sv passive_quote_policy.sv formal_quote_policy.sv
+prep -top formal_quote_policy
+
+[files]
+../passive_quote_policy.sv
+../market_codes.svh
+formal_quote_policy.sv

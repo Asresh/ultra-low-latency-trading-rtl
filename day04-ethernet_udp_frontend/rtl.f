@@ -1,0 +1,11 @@
+frontend_pair_ram.sv
+eth_rx_bank.sv
+eth_rule_table.sv
+eth_rx_path.sv
+eth_tx_header.sv
+eth_tx_bank.sv
+eth_packet_arbiter.sv
+eth_tx_path.sv
+eth_counter_bank.sv
+ethernet_udp_frontend.sv
+eth_config_csr.sv

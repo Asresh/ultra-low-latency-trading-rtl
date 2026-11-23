@@ -9,26 +9,38 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  inventory:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enforce source inventory
+        run: make inventory | tee -a "$GITHUB_STEP_SUMMARY"
+        shell: bash
+
+  legacy:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      PROJECTS: day01-redundant_market_data day02-banked_matching_engine day03-order_risk_gateway
     steps:
       - uses: actions/checkout@v5
       - uses: YosysHQ/setup-oss-cad-suite@v4
         with:
           version: '2026-11-22'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Verify source inventory and regressions
+      - name: Run original three regressions
         run: |
-          make inventory >> "$GITHUB_STEP_SUMMARY"
           make -j3 test
           make -j3 lint
-      - name: Synthesize and prove
+      - name: Synthesize and verify original cores
         run: |
           make -j3 synth
-          make formal
+          mkdir -p day02-banked_matching_engine/build day03-order_risk_gateway/build
+          (cd day02-banked_matching_engine/formal && sby -f --prefix ../build/fifo fifo.sby prove cover)
+          (cd day02-banked_matching_engine/formal && sby -f --prefix ../build/arbiter arbiter.sby prove cover)
+          (cd day03-order_risk_gateway/formal && sby -f --prefix ../build/gateway gateway.sby bmc cover)
           make netlist-check
-      - name: Route cores and publish measurements
+      - name: Route original cores and publish measurements
         run: |
           make route ROUTE_JOBS=2
           cat build/characterization/result.md >> "$GITHUB_STEP_SUMMARY"
@@ -41,3 +53,32 @@ jobs:
             day*/build/characterization/*.report.json
             day*/build/characterization/*.log
           if-no-files-found: ignore
+
+  expansion:
+    name: Verify ${{ matrix.project }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {project: day04-ethernet_udp_frontend, test_target: test}
+          - {project: day05-market_state_quote_engine, test_target: regress}
+          - {project: day06-multiclock_latency_telemetry, test_target: test}
+          - {project: day07-ouch_order_session, test_target: test}
+          - {project: day08-host_dma_queues, test_target: test}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: YosysHQ/setup-oss-cad-suite@v4
+        with:
+          version: '2026-11-22'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Simulate against reference models
+        run: make -C "${{ matrix.project }}" -j2 "${{ matrix.test_target }}"
+      - name: Lint and synthesize
+        run: |
+          make -C "${{ matrix.project }}" lint
+          make -C "${{ matrix.project }}" synth
+      - name: Verify market-state properties
+        if: matrix.project == 'day05-market_state_quote_engine'
+        run: make -C day05-market_state_quote_engine formal

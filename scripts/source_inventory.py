@@ -10,11 +10,19 @@ import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PROJECTS = (
+LEGACY_PROJECTS = (
     "day01-redundant_market_data",
     "day02-banked_matching_engine",
     "day03-order_risk_gateway",
 )
+EXPANSION_PROJECTS = (
+    "day04-ethernet_udp_frontend",
+    "day05-market_state_quote_engine",
+    "day06-multiclock_latency_telemetry",
+    "day07-ouch_order_session",
+    "day08-host_dma_queues",
+)
+PROJECTS = LEGACY_PROJECTS + EXPANSION_PROJECTS
 BASELINE_COMMIT = "80c7c41209814901a715ce0ee029ee4868b742cf"
 IGNORED_DIRS = {"build", "obj_dir", "fixtures", "generated", "__pycache__"}
 
@@ -102,7 +110,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--minimum", type=int, default=0, help="require this many source lines per project")
     parser.add_argument("--compare", action="store_true", help="compare same-name files at the original release")
+    parser.add_argument("--enforce", action="store_true", help="apply the portfolio's per-release source floors")
+    parser.add_argument("--project", choices=PROJECTS, action="append", help="inspect selected projects")
     args = parser.parse_args()
+    if args.minimum < 0:
+        parser.error("--minimum cannot be negative")
     columns = "| Project | RTL | Verification / tools | Total |"
     alignment = "| --- | ---: | ---: | ---: |"
     if args.compare:
@@ -111,15 +123,19 @@ def main():
     print(columns)
     print(alignment)
     below = []
-    for project in PROJECTS:
+    for project in args.project or PROJECTS:
         counts = collect(project, args.compare)
         total = counts["rtl"] + counts["verification"]
         row = f"| {project} | {counts['rtl']} | {counts['verification']} | {total} |"
         print(row + (f" {counts['added']} |" if args.compare else ""))
-        if total < args.minimum:
-            below.append(project)
+        minimum = args.minimum
+        if args.enforce:
+            floor = 5001 if project in EXPANSION_PROJECTS else 2000
+            minimum = max(floor, minimum)
+        if total < minimum:
+            below.append(f"{project} ({total} < {minimum})")
     if below:
-        parser.exit(1, f"Below {args.minimum} source lines: {', '.join(below)}\n")
+        parser.exit(1, f"Source floor unmet: {', '.join(below)}\n")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ module tb_dma_crc_irq;
         .minimum_batch, .maximum_delay, .request, .unacknowledged
     );
 
+    // Reverse bit order between the serial CRC reference and reflected CRC output.
     function automatic [31:0] reverse32(input logic [31:0] value);
         for (integer i = 0; i < 32; i = i + 1)
             reverse32[i] = value[31-i];
@@ -118,6 +119,7 @@ module tb_dma_crc_irq;
                    expected_request, pending, request, unacknowledged, clock_id);
     end
 
+    // Drive one CRC test stimulus ahead of the next sampled edge.
     task automatic set_crc(
         input logic start_seed,
         input logic enabled,
@@ -132,6 +134,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Set one completion or IRQ control stimulus for the moderation scoreboard.
     task automatic set_irq(
         input logic should_clear, completed, notify, host_ack,
         input integer batch,
@@ -147,6 +150,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Apply a CRC stimulus and compare the completed result.
     task automatic crc_once(
         input logic start_seed,
         input logic enabled,
@@ -161,6 +165,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Drive one moderator step and compare the interrupt behavior.
     task automatic irq_once(
         input logic should_clear, completed, notify, host_ack,
         input integer batch,
@@ -174,6 +179,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Check the IEEE reference string and byte-lane ordering.
     task automatic check_crc_golden;
         begin
             crc_once(1, 1, 64'hface_9481_6bb8_fed6, 8'hff);
@@ -200,6 +206,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Exercise batch, timer, forced and acknowledgment behavior.
     task automatic check_irq_moderation;
         begin
             @(negedge clk);
@@ -253,6 +260,7 @@ module tb_dma_crc_irq;
         end
     endtask
 
+    // Mix the current seed to create the next deterministic test value.
     function automatic [63:0] scramble64(input logic [63:0] value);
         logic [63:0] x;
         begin

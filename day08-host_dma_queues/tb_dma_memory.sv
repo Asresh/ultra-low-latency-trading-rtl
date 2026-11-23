@@ -63,6 +63,7 @@ module tb_dma_memory #(
                      !block_write_address && random_bits[6:4] > 1;
     assign wready = !reset && writing && random_bits[11:8] > 4;
 
+    // Read an aligned 64-bit word from the byte-addressed memory model.
     function automatic logic [63:0] word(input logic [63:0] address);
         logic [63:0] result;
         begin
@@ -72,6 +73,7 @@ module tb_dma_memory #(
         end
     endfunction
 
+    // Write all eight little-endian bytes into the memory model.
     task automatic store_word(input logic [63:0] address, input logic [63:0] value);
         begin
             for (integer lane = 0; lane < 8; lane++)
@@ -79,6 +81,7 @@ module tb_dma_memory #(
         end
     endtask
 
+    // Initialize each memory byte to a known fill pattern.
     task automatic clear_memory(input logic [7:0] pattern);
         begin
             for (integer index = 0; index < MEMORY_BYTES; index++)
@@ -86,6 +89,7 @@ module tb_dma_memory #(
         end
     endtask
 
+    // Validate the incoming AXI burst geometry before modeling memory accesses.
     task automatic check_burst(input logic [63:0] addr, input logic [7:0] length,
                                input logic [2:0] size, input logic [1:0] burst_kind);
         integer bytes;

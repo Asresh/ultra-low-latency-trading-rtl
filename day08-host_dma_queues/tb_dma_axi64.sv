@@ -33,6 +33,7 @@ module tb_dma_axi64 #(
     localparam integer FAULT_B = 1;
     logic [31:0] rng = 32'h0d0a_7749;
 
+    // Produce a deterministic pseudo-random 32-bit word for stall and data drivers.
     function automatic [31:0] random_word(input logic [31:0] prior);
         logic [31:0] tmp;
         begin
@@ -42,6 +43,7 @@ module tb_dma_axi64 #(
         end
     endfunction
 
+    // Compute a deterministic reference payload from AXI address and direction.
     function automatic [63:0] data_at(input logic [63:0] address, input logic direction);
         logic [63:0] x;
         begin
@@ -50,6 +52,7 @@ module tb_dma_axi64 #(
         end
     endfunction
 
+    // Predict the burst size from remaining bytes and 4 KiB page room.
     function automatic integer choose_burst(input logic [63:0] address, input integer bytes);
         integer left_on_page, planned;
         begin
@@ -63,6 +66,7 @@ module tb_dma_axi64 #(
         end
     endfunction
 
+    // Build the byte-enable mask for the current transfer tail.
     function automatic [7:0] mask_for(input integer remaining);
         integer bytes;
         begin
@@ -72,6 +76,7 @@ module tb_dma_axi64 #(
         end
     endfunction
 
+    // Flag rounded ranges, lengths, or start addresses that the AXI master rejects.
     function automatic bit invalid_transfer(input logic [63:0] address, input integer bytes);
         logic [64:0] end_exclusive;
         begin
@@ -123,6 +128,7 @@ module tb_dma_axi64 #(
         end
     end
 
+    // Compare the emitted AXI burst fields and rule out a page crossing.
     task automatic validate_address(
         input logic [63:0] actual_addr,
         input logic [7:0] actual_len,
@@ -149,6 +155,7 @@ module tb_dma_axi64 #(
         end
     endtask
 
+    // Exercise simultaneous read and write traffic with independent stalls and faults.
     task automatic run_case(
         input logic [63:0] start_r, start_w,
         input integer bytes_r, bytes_w, mode_r, mode_w

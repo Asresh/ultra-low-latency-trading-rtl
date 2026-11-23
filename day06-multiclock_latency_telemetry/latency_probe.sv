@@ -30,6 +30,7 @@ module latency_probe #(
     logic [63:0] local_tick;
     logic time_live;
 
+    // Reconstruct the binary time counter by accumulating Gray-code parity.
     function automatic logic [63:0] unpack_gray(input logic [63:0] value);
         logic [63:0] binary;
         integer bit_index;

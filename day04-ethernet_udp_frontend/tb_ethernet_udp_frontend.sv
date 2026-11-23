@@ -90,6 +90,7 @@ module tb_ethernet_udp_frontend;
     integer observed_status_lane;
     string directory;
 
+    // Advance the seeded bit generator used for reproducible stalls.
     function automatic logic [31:0] prng(input logic [31:0] state);
         logic [31:0] mixed;
         begin
@@ -99,6 +100,7 @@ module tb_ethernet_udp_frontend;
         end
     endfunction
 
+    // Choose the consumer ready signal for the selected deterministic stall mode.
     function automatic logic sink_ready(input integer mode, input logic [2:0] random_bits);
         case (mode)
             1: sink_ready = 1;
@@ -107,6 +109,7 @@ module tb_ethernet_udp_frontend;
         endcase
     endfunction
 
+    // Count the asserted byte lanes in a hardware beat.
     function automatic integer width_of_keep(input logic [7:0] keep);
         integer count;
         begin
@@ -262,6 +265,7 @@ module tb_ethernet_udp_frontend;
         end
     end
 
+    // Insert a source gap before the next batch item in randomized mode.
     task automatic maybe_pause(input integer mode, input logic [31:0] random_bits);
         begin
             if (mode != 0 && random_bits[2:0] < 3)
@@ -269,6 +273,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Drive one selected receive frame while holding each beat until accepted.
     task automatic feed_rx(input integer number, input integer mode);
         logic [63:0] lane_word;
         logic [7:0] keep;
@@ -302,6 +307,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Drive one transmit descriptor and hold its matching stream beats until accepted.
     task automatic feed_tx(input integer lane, input integer number, input integer mode);
         logic [319:0] descriptor_word;
         logic [63:0] lane_word;
@@ -341,6 +347,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Complete one inactive rule-bank register write before proceeding.
     task automatic rule_write(input logic [2:0] index, input logic [255:0] rule);
         begin
             @(negedge clk);
@@ -353,6 +360,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Switch the staged rule image after the hardware accepts a commit.
     task automatic rule_commit;
         logic [7:0] old_epoch;
         begin
@@ -367,6 +375,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Read one statistics word and compare the full observed counter value.
     task automatic expect_stat(input logic [4:0] index, input logic [63:0] wanted);
         logic [31:0] previous_id;
         begin
@@ -381,6 +390,7 @@ module tb_ethernet_udp_frontend;
         end
     endtask
 
+    // Check the recorded cycle gaps against the directed latency budget.
     task automatic expect_timing(input integer rx_clocks, input integer tx_clocks,
                                  input integer tx_gap, input integer duplex_clocks);
         begin

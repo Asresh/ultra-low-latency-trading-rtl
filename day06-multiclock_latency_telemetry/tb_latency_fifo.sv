@@ -36,6 +36,7 @@ module tb_latency_fifo #(
     logic [31:0] wrng = 32'h7c00192a, rrng = 32'h98fce03d;
     integer epoch = 0;
 
+    // Generate the next deterministic state for the test's randomized choices.
     function automatic logic [31:0] advance(input logic [31:0] x);
         logic [31:0] t;
         begin
@@ -45,6 +46,7 @@ module tb_latency_fifo #(
         end
     endfunction
 
+    // Construct a fixture word from the test index and reset generation.
     function automatic logic [WIDTH-1:0] payload(input integer index, input integer generation);
         logic [31:0] scrambled;
         begin
@@ -104,6 +106,7 @@ module tb_latency_fifo #(
         end
     end
 
+    // Reset both FIFO clock domains and establish a fresh fixture generation.
     task automatic shared_reset(input integer generation);
         begin
             writing = 0;

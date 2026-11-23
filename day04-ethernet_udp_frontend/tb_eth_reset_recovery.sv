@@ -84,6 +84,7 @@ module tb_eth_reset_recovery;
         end
     end
 
+    // Send one transmit descriptor and wait for its input handshake.
     task automatic offer_description(input logic [31:0] cookie, input logic [15:0] bytes);
         begin
             @(negedge clk);
@@ -99,6 +100,7 @@ module tb_eth_reset_recovery;
         end
     endtask
 
+    // Send one framed beat and hold its data and boundary fields until accepted.
     task automatic send_piece(input logic [63:0] data, input logic [7:0] keep, input logic last);
         begin
             @(negedge clk);
@@ -113,6 +115,7 @@ module tb_eth_reset_recovery;
         end
     endtask
 
+    // Assert reset across the sampled edge and return to normal bench drive.
     task automatic pulse_reset;
         begin
             @(negedge clk);

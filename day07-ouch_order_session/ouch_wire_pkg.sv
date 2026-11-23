@@ -188,54 +188,64 @@ package ouch_wire_pkg;
         logic [7:0] order_state;
     } inbound_t;
 
+    // Reverse all 32 bits by bytes between host and wire order.
     function automatic logic [31:0] swap32(input logic [31:0] value);
         swap32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
     endfunction
 
+    // Reverse all 48 bits by bytes between host and wire order.
     function automatic logic [47:0] swap48(input logic [47:0] value);
         integer i;
         for (i = 0; i < 6; i = i + 1)
             swap48[i*8 +: 8] = value[(5-i)*8 +: 8];
     endfunction
 
+    // Reverse all 64 bits by bytes between host and wire order.
     function automatic logic [63:0] swap64(input logic [63:0] value);
         integer i;
         for (i = 0; i < 8; i = i + 1)
             swap64[i*8 +: 8] = value[(7-i)*8 +: 8];
     endfunction
 
+    // Reverse all 80 bits by bytes between host and wire order.
     function automatic logic [79:0] swap80(input logic [79:0] value);
         integer i;
         for (i = 0; i < 10; i = i + 1)
             swap80[i*8 +: 8] = value[(9-i)*8 +: 8];
     endfunction
 
+    // Reverse all 112 bits by bytes between host and wire order.
     function automatic logic [111:0] swap112(input logic [111:0] value);
         integer i;
         for (i = 0; i < 14; i = i + 1)
             swap112[i*8 +: 8] = value[(13-i)*8 +: 8];
     endfunction
 
+    // Reverse all 160 bits by bytes between host and wire order.
     function automatic logic [159:0] swap160(input logic [159:0] value);
         integer i;
         for (i = 0; i < 20; i = i + 1)
             swap160[i*8 +: 8] = value[(19-i)*8 +: 8];
     endfunction
 
+    // Recognize the side codes supported by the OUCH enter path.
     function automatic logic valid_side(input logic [7:0] side);
         valid_side = side == "B" || side == "S";
     endfunction
 
+    // Recognize one ASCII letter or digit without locale-dependent classification.
     function automatic logic alnum(input logic [7:0] c);
         alnum = (c >= "A" && c <= "Z") ||
                 (c >= "a" && c <= "z") ||
                 (c >= "0" && c <= "9");
     endfunction
 
+    // Increment a diagnostic counter and saturate at the unsigned maximum.
     function automatic logic [31:0] incr_counter(input logic [31:0] value);
         incr_counter = (&value) ? value : value + 1'b1;
     endfunction
 
+    // Require an alphanumeric symbol followed only by optional space padding.
     function automatic logic valid_symbol(input logic [63:0] symbol);
         logic pad_started;
         logic good;
@@ -256,6 +266,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Check the fixed-width client field for allowed characters and trailing spaces.
     function automatic logic valid_client(input logic [111:0] id);
         logic good;
         logic nonblank;
@@ -275,6 +286,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Check the ten-byte session name and its optional blank login form.
     function automatic logic valid_session(input logic [79:0] id, input logic allow_blank);
         logic nonblank;
         logic good;
@@ -296,6 +308,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Check the credential field's printable non-space prefix and padding.
     function automatic logic valid_credentials(input logic [79:0] field, input integer bytes);
         logic nonblank;
         logic pad_started;
@@ -319,6 +332,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Recognize the supported ASCII decimal timeout field.
     function automatic logic valid_timeout(input logic [39:0] field);
         logic good;
         logic nonzero;
@@ -336,6 +350,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Encode a one-byte SoupBinTCP control packet.
     function automatic packet_t control_packet(input logic [7:0] packet_type);
         packet_t result;
         body_t bytes;
@@ -348,6 +363,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Lay out the fixed-width SoupBinTCP login request in wire byte order.
     function automatic packet_t login_packet(
         input logic [47:0] username,
         input logic [79:0] password,
@@ -372,6 +388,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Encode a validated order entry command as a fixed OUCH wire payload.
     function automatic packet_t enter_packet(
         input logic [31:0] order_ref, input logic [7:0] side,
         input logic [31:0] quantity, input logic [63:0] symbol,
@@ -398,6 +415,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Encode both old and new references plus replace attributes in wire order.
     function automatic packet_t replace_packet(
         input logic [31:0] previous_order_ref, input logic [31:0] order_ref,
         input logic [31:0] quantity, input logic [63:0] price,
@@ -423,6 +441,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Encode the reference and cancel quantity as an OUCH request.
     function automatic packet_t cancel_packet(
         input logic [31:0] order_ref, input logic [31:0] quantity
     );
@@ -439,6 +458,7 @@ package ouch_wire_pkg;
         end
     endfunction
 
+    // Select the wire encoder for enter, replace or cancel.
     function automatic packet_t encode_command(
         input logic [2:0] kind, input logic [31:0] previous_order_ref,
         input logic [31:0] order_ref, input logic [31:0] quantity,

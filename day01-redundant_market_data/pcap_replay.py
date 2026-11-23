@@ -40,6 +40,7 @@ class Endpoint:
     port: int
 
     @classmethod
+    # Validate an IPv4 address and decimal UDP port from the command line.
     def parse(cls, text):
         host, delimiter, port = text.rpartition(":")
         if not delimiter:
@@ -68,6 +69,7 @@ class Beat(NamedTuple):
     last: int
 
 
+# Return exactly size bytes or identify a truncated structure in the capture.
 def exact_read(file, size, label):
     part = file.read(size)
     if len(part) != size:
@@ -75,6 +77,7 @@ def exact_read(file, size, label):
     return part
 
 
+# Yield normalized nanosecond timestamps and Ethernet frames from classic PCAP records.
 def read_capture(file):
     header = exact_read(file, 24, "PCAP header")
     try:
@@ -105,6 +108,7 @@ def read_capture(file):
         yield seconds * NANOSECONDS + fraction * fraction_scale, packet
 
 
+# Verify an IPv4 header using the folded one's-complement word sum.
 def header_checksum_valid(header):
     words = struct.unpack(f">{len(header) // 2}H", header)
     total = sum(words)
@@ -113,6 +117,7 @@ def header_checksum_valid(header):
     return total == 0xFFFF
 
 
+# Extract a bounded UDP payload and its destination after VLAN and IPv4 validation.
 def udp_datagram(frame, verify_ipv4=False):
     if len(frame) < 14:
         raise PacketDrop("short ethernet")
@@ -152,6 +157,7 @@ def udp_datagram(frame, verify_ipv4=False):
     return Datagram(Endpoint(ip[16:20], port), udp[8:])
 
 
+# Split payload bytes into consecutive lane cycles and set the little-endian data and keep fields.
 def pack_beats(cycle, lane, payload):
     for offset in range(0, len(payload), 8):
         data = payload[offset:offset + 8]
@@ -161,10 +167,12 @@ def pack_beats(cycle, lane, payload):
         )
 
 
+# Format one scheduled beat as a replay-file line.
 def render(beat):
     return f"{beat.cycle} {beat.lane} {beat.data:016x} {beat.keep:02x} {beat.first} {beat.last}\n"
 
 
+# Read a lane's sorted spool as records keyed by cycle and lane for the final merge.
 def read_staging(file):
     # Each lane is already sorted. Only two records need to be held for the merge.
     for row in file:
@@ -172,6 +180,7 @@ def read_staging(file):
         yield int(cycle), int(lane), row
 
 
+# Map selected endpoints to lanes, quantize capture time into cycles, and report accepted and dropped traffic.
 def schedule(packet_records, output, endpoints, clock_hz, gap_cycles=0, verify_ipv4=False):
     endpoints = tuple(endpoints)
     if len(endpoints) != 2 or endpoints[0] == endpoints[1]:
@@ -220,6 +229,7 @@ def schedule(packet_records, output, endpoints, clock_hz, gap_cycles=0, verify_i
     return stats
 
 
+# Validate input and output paths, run the offline replay conversion, and print its statistics.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path)

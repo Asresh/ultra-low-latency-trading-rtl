@@ -81,6 +81,7 @@ module tb_host_dma_queues;
     logic [31:0] sink_bits = 32'ha57b1273;
     integer completion_capture = 0, packet_capture = 0;
 
+    // Open optional completion and packet logs when a capture path is supplied.
     task automatic open_capture;
         string directory;
         begin
@@ -93,6 +94,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Emit the exact 32 CQ bytes from simulated host memory.
     task automatic save_completion(input logic [63:0] location);
         begin
             if (completion_capture) begin
@@ -103,21 +105,27 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Select the configured submission-ring address for this fixture queue.
     function automatic logic [63:0] sq_base(input logic q);
         sq_base = q ? 64'h900 : 64'h100;
     endfunction
+    // Select the configured completion-ring address for this fixture queue.
     function automatic logic [63:0] cq_base(input logic q);
         cq_base = q ? 64'hc00 : 64'h300;
     endfunction
+    // Return the first DMA data address permitted for this queue.
     function automatic logic [63:0] aperture_start(input logic q);
         aperture_start = q ? 64'h5000 : 64'hf00;
     endfunction
+    // Return the exclusive upper data address for this queue.
     function automatic logic [63:0] aperture_end(input logic q);
         aperture_end = q ? 64'h8000 : 64'h4800;
     endfunction
+    // Map an absolute 32-bit ring cursor to its wrapped physical slot.
     function automatic logic [63:0] slot(input logic [63:0] base, input logic [31:0] sequence_number);
         slot = base + (64'(sequence_number & (SLOTS-1)) << 5);
     endfunction
+    // Generate the expected fixture byte from its offset and a seed.
     function automatic logic [7:0] pattern(input integer seed, input integer offset);
         logic [31:0] x;
         begin
@@ -127,6 +135,7 @@ module tb_host_dma_queues;
         end
     endfunction
 
+    // Calculate the fixture's CRC independently of the hardware datapath.
     function automatic logic [31:0] reference_crc(input integer seed, input integer bytes);
         logic [31:0] crc;
         logic [31:0] reduction [0:255];
@@ -202,6 +211,7 @@ module tb_host_dma_queues;
         end
     end
 
+    // Write queue configuration and compare the observed acknowledgment.
     task automatic configure(
         input logic q, input logic enabled, input logic [31:0] seed, input logic bad, input logic want_ok
     );
@@ -231,6 +241,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Publish SQ tail and CQ head together, then check the result.
     task automatic ring_doorbell(
         input logic q, input logic [31:0] submitted, released, input logic want_ok
     );
@@ -249,6 +260,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Populate simulated memory with the fixture bytes for this transfer.
     task automatic initialize_payload(input logic [63:0] location, input integer count, seed);
         begin
             for (integer offset = 0; offset < count; offset++)
@@ -256,6 +268,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Encode one descriptor into host memory and publish it to the engine.
     task automatic submit(
         input logic q, input logic [7:0] op, flags, input logic [15:0] tag,
         input logic [31:0] count, input logic [63:0] addr, cookie,
@@ -273,6 +286,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Wait for CQ visibility, compare all record fields, and optionally release credit.
     task automatic expect_completion(
         input logic q, input logic [7:0] status, op, input logic [15:0] tag,
         input logic [31:0] count, input logic [63:0] cookie, input logic [31:0] digest,
@@ -304,6 +318,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Arm the output scoreboard for one packet with a specific identity and payload.
     task automatic expect_packet(
         input logic q, input logic [15:0] tag, input logic [63:0] cookie,
         input integer count, seed
@@ -320,6 +335,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Check the capture notice and accept it with programmed backpressure.
     task automatic accept_capture(input logic q,input logic [15:0] tag,input logic [31:0] count);
         begin
             wait (capture_valid);
@@ -332,6 +348,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Hold a device-stream beat and all sidebands until accepted.
     task automatic drive_packet_beat(
         input logic [63:0] data, input logic [7:0] keep,
         input logic first, last
@@ -349,6 +366,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Drive a complete device packet, with a partial final beat if needed.
     task automatic complete_device_packet(input integer bytes, seed);
         logic [63:0] data;
         logic [7:0] keep;
@@ -367,6 +385,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Compare stored payload bytes and verify adjacent bytes were not overwritten.
     task automatic verify_memory(input logic [63:0] location,input integer bytes,seed);
         begin
             for (integer offset = 0; offset < bytes; offset++)
@@ -378,6 +397,7 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Apply a synchronous reset and return the interface drivers to idle.
     task automatic reset_core;
         begin
             @(negedge clk);

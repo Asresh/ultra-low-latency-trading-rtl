@@ -23,6 +23,7 @@ class Replay:
 
 class CycleScheduler:
     def __init__(self, frequency_hz, interframe_idle=0):
+        """Set the rational replay period and initialize the next available Ethernet edge."""
         self.period = tick_period_ns(frequency_hz)
         if interframe_idle < 0:
             raise ValueError("interframe idle must be nonnegative")
@@ -33,6 +34,7 @@ class CycleScheduler:
         self.last_timestamp = None
 
     def start(self, time_ns, count):
+        """Map an optional packet timestamp to a cycle without overlapping earlier traffic."""
         if count <= 0:
             raise ValueError("cannot schedule empty packet")
         if time_ns is not None:
@@ -65,6 +67,7 @@ class Totals:
     vlans: Counter = field(default_factory=Counter)
 
     def count(self, record):
+        """Increment an aggregate count and byte total for one packet."""
         self.packets += 1
         self.wire_bytes += record.wire_length
         self.capture_bytes += len(record.captured)
@@ -74,6 +77,7 @@ class Totals:
             self.last_ns = t if self.last_ns is None else max(t,self.last_ns)
 
     def resolved(self, result, replay_count):
+        """Account for a decoded disposition and categorize its delivered data."""
         self.emitted_packets += 1
         self.emitted_beats += replay_count
         self.disposition[result.result.name] += 1
@@ -85,6 +89,7 @@ class Totals:
             self.vlans[identifier or "untagged"] += 1
 
     def as_dict(self):
+        """Export the accumulated counts in a stable reporting format."""
         stats = vars(self).copy()
         for key in ("disposition","queues","vlans"):
             stats[key] = dict(sorted(stats[key].items()))
@@ -96,6 +101,7 @@ class Totals:
 
 
 def wire_without_fcs(record, fcs_mode):
+    """Remove declared capture FCS bytes and report the frame's verification state."""
     if fcs_mode not in ("metadata","none","force","verify"):
         raise ValueError("invalid FCS mode")
     count = 4 if fcs_mode in ("force","verify") else record.fcs_bytes if fcs_mode == "metadata" else 0
@@ -115,6 +121,7 @@ def wire_without_fcs(record, fcs_mode):
 class Study:
     def __init__(self, rules, *, clock_hz=156250000, fcs_mode="metadata",
                  max_frame=1536, allow_zero=True, interface=None, idle=0, epoch=1):
+        """Set capture filters, clock geometry, and classification state for a replay study."""
         if max_frame < 64 or max_frame > 65535:
             raise ValueError("invalid capture study frame bound")
         self.rules = tuple(rules)
@@ -128,6 +135,7 @@ class Study:
         self.total = Totals()
 
     def add(self, record):
+        """Filter and classify one capture record before assigning its transmission interval."""
         if self.interface is not None and self.interface != record.key:
             return ()
         index = f"{record.section}:{record.interface}"
@@ -167,6 +175,7 @@ class Study:
                      for i,beat in enumerate(beats))
 
     def report(self):
+        """Summarize errors, timing, and packet and byte totals for the inspected capture."""
         return {
             "total":self.total.as_dict(),
             "interfaces":{key:{"name":entry["name"],**entry["totals"].as_dict()}
@@ -178,10 +187,12 @@ class Study:
 
 
 def interface_totals(name):
+    """Aggregate capture outcomes separately for each section and interface."""
     return {"name":name,"totals":Totals()}
 
 
 def interface_id(value):
+    """Parse the section and interface selector used to filter the capture."""
     try:
         values = tuple(int(x) for x in value.split(":"))
         if len(values) != 2 or min(values) < 0:
@@ -192,6 +203,7 @@ def interface_id(value):
 
 
 def row_outputs(study, capture, data_handle=None, expectations=None):
+    """Write the requested replay rows and summary from one completed study."""
     for record in capture:
         for row in study.add(record):
             if data_handle is not None:
@@ -203,6 +215,7 @@ def row_outputs(study, capture, data_handle=None, expectations=None):
 
 
 def main():
+    """Load a capture and select its analysis, timing, and export options."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("capture",type=Path)
     ap.add_argument("--policy",type=Path)

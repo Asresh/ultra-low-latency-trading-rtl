@@ -1,3 +1,4 @@
+// Return the length of a contiguous mask starting from the low byte lane.
 function automatic logic [3:0] prefix_bytes(input logic [7:0] keep);
     case (keep)
         8'h01: prefix_bytes = 4'd1;
@@ -12,11 +13,13 @@ function automatic logic [3:0] prefix_bytes(input logic [7:0] keep);
     endcase
 endfunction
 
+// Reverse bus byte lanes into big-endian order for protocol field reads.
 function automatic logic [63:0] wire_big(input logic [63:0] lane_data);
     for (integer lane = 0; lane < 8; lane = lane+1)
         wire_big[63-8*lane -: 8] = lane_data[8*lane +: 8];
 endfunction
 
+// Accumulate complete or partial network-order checksum words.
 function automatic logic [31:0] sum_word(
     input logic [31:0] previous, input logic [63:0] lanes, input logic [3:0] length
 );
@@ -30,6 +33,7 @@ function automatic logic [31:0] sum_word(
     end
 endfunction
 
+// Fold a checksum accumulator using end-around carry.
 function automatic logic [15:0] fold_sum(input logic [31:0] accumulator);
     logic [16:0] folded;
     begin
@@ -38,6 +42,7 @@ function automatic logic [15:0] fold_sum(input logic [31:0] accumulator);
     end
 endfunction
 
+// Accumulate the IPv4 UDP pseudo-header's words before adding payload bytes.
 function automatic logic [31:0] pseudo_sum(
     input logic [31:0] source_addr,
     input logic [31:0] destination_addr,

@@ -13,11 +13,13 @@ from latency_reference import ClassHistogram, HALF64, Status, modular_delta
 
 
 def parse_capture(directory, name, width):
+    """Load one captured word stream at its expected width."""
     with (directory / name).open(encoding="ascii") as source:
         yield from read_words(source, width)
 
 
 def verify(directory, groups):
+    """Check captured data against the independent reference for this scenario."""
     event_words = parse_capture(directory, "events.hex", 320)
     transfer_ticks = parse_capture(directory, "transfers.hex", 64)
     transmitted = []
@@ -44,6 +46,7 @@ def verify(directory, groups):
 
 
 def verify_histograms(transmitted, snapshots):
+    """Compare snapshots with the sample history at each captured boundary."""
     offset = 0
     previous_cut = None
     for frame in snapshots:
@@ -76,6 +79,7 @@ def verify_histograms(transmitted, snapshots):
 
 
 def verify_traces(records, traces):
+    """Compare trigger position and each retained trace record with the event stream."""
     next_start = 0
     for frame in traces:
         segment = list(frame.records)
@@ -88,6 +92,7 @@ def verify_traces(records, traces):
 
 
 def main():
+    """Read and verify the simulation's event, histogram and trace captures."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
     parser.add_argument("--classes", type=int, default=4)

@@ -24,6 +24,7 @@ class ReplayVector:
 
     @classmethod
     def from_entry(cls, entry: Entry) -> "ReplayVector":
+        """Extract simulator drive fields from one validated replay journal entry."""
         row = entry.register
         return cls(row.cycle, CycleInput(
             row.reset, row.tick, entry.command, row.response_ready, row.quote_ready,
@@ -31,9 +32,11 @@ class ReplayVector:
 
     @classmethod
     def from_trace(cls, trace: Trace) -> "ReplayVector":
+        """Extract the corresponding drive values from one hardware trace cycle."""
         return cls(trace.cycle, trace.stimulus)
 
     def line(self) -> str:
+        """Write the fixed-width hexadecimal replay vector record."""
         stim = self.stimulus
         cmd = stim.command or Command()
         vector = (
@@ -61,6 +64,7 @@ class RunStats:
     status_counts: Optional[Dict[str, int]] = None
 
     def visit(self, entry: Entry, trace: Trace) -> None:
+        """Accumulate handshake, latency, and state counts for a matched cycle."""
         row = entry.register
         self.cycles += 1
         self.max_backlog = max(self.max_backlog, row.pending)
@@ -84,6 +88,7 @@ class RunStats:
 
 
 def expected_pins(entry: Entry) -> Combinational:
+    """Construct the expected pin bundle from a decoded journal row."""
     row = entry.register
     return Combinational(
         source_ready=row.source_ready, response=entry.response, quote=entry.quote,
@@ -93,6 +98,7 @@ def expected_pins(entry: Entry) -> Combinational:
 
 
 def explain_context(history: Deque[str], entry: Entry, trace: Trace, detail: str) -> JournalError:
+    """Show the mismatch and recent cycles needed to reproduce it."""
     map_ = entry.register
     want = expected_pins(entry)
     suffix = "; ".join(history)
@@ -107,6 +113,7 @@ def explain_context(history: Deque[str], entry: Entry, trace: Trace, detail: str
 
 
 def describe_command(command: Command) -> str:
+    """Format request identity and fields so a trace mismatch is actionable."""
     try:
         name = Operation(command.op).name
     except ValueError:
@@ -115,6 +122,7 @@ def describe_command(command: Command) -> str:
 
 
 def audit_and_export(source: TextIO, vector_sink: TextIO) -> Tuple[Config, int, Dict]:
+    """Validate the software journal while exporting its RTL stimulus."""
     cfg, profile = read_config(source)
     audit = Audit(cfg)
     count = 0
@@ -130,6 +138,7 @@ def audit_and_export(source: TextIO, vector_sink: TextIO) -> Tuple[Config, int, 
 def compare(
     expected: Iterable[Entry], observed: Iterable[Trace], history_depth: int = 8,
 ) -> RunStats:
+    """Walk journal and hardware traces in order and compare each sampled pin."""
     if history_depth <= 0:
         raise ValueError("history depth must be positive")
     history: Deque[str] = deque(maxlen=history_depth)
@@ -168,6 +177,7 @@ def compare(
 
 
 def validate_simulator_config(cfg: Config) -> None:
+    """Reject parameter widths and geometries unsupported by the trace bench."""
     limits = {
         "banks": 8, "slots": 512, "levels": 256, "quantity_width": 30,
         "sequence_width": 30, "tag_width": 30,
@@ -182,6 +192,7 @@ def validate_simulator_config(cfg: Config) -> None:
 
 
 def compile_rtl(cfg: Config, iverilog: str, simulator: Path) -> None:
+    """Elaborate the hardware for the checked config and common replay testbench."""
     validate_simulator_config(cfg)
     params = []
     for name, value in cfg.rtl_parameters().items():
@@ -194,6 +205,7 @@ def compile_rtl(cfg: Config, iverilog: str, simulator: Path) -> None:
 
 
 def compare_files(journal: Path, trace: Path) -> Dict:
+    """Open a journal and trace together and return their cycle comparison summary."""
     with journal.open(encoding="utf-8") as expected:
         cfg, profile = read_config(expected)
         judge = compare(read_entries(expected, cfg), records(trace, cfg))
@@ -201,6 +213,7 @@ def compare_files(journal: Path, trace: Path) -> Dict:
 
 
 def run_cosim(args: argparse.Namespace) -> Dict:
+    """Prepare checked inputs, run the simulator, and compare the resulting trace."""
     work = args.build.resolve()
     work.mkdir(parents=True, exist_ok=True)
     vectors, raw_trace = work / "clock_vectors.txt", work / "rtl_trace.txt"
@@ -216,6 +229,7 @@ def run_cosim(args: argparse.Namespace) -> Dict:
 
 
 def main() -> None:
+    """Parse cosimulation file and tool arguments and print the verified summary."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     drive = sub.add_parser("run", help="audit, simulate, and compare a JSONL journal")

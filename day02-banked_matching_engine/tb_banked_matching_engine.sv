@@ -67,6 +67,7 @@ module tb_banked_matching_engine #(
                 check_slot_links();
         end
 
+        // Walk local slot links and assert linked-list reachability and level head/tail consistency.
         task automatic check_slot_links;
             bit [ORDER_SLOTS-1:0] seen;
             integer node, previous, best_bid, best_ask, listed, sum_qty;
@@ -130,6 +131,7 @@ module tb_banked_matching_engine #(
     end
     assign event_used[16*BANKS+:16] = 16'(dut.invalid_instrument.used);
 
+    // Write a complete sampled edge for the independent Python reference and timing report.
     task automatic trace_cycle(input integer fd, input integer cycle);
         $fwrite(fd, "%0d %0d %0d %0d %0d %0d %0d %0d %0d %0d %0d ",
             cycle, rst, s_valid, s_ready, s_instrument, s_opcode, s_tif, s_is_ask,

@@ -23,10 +23,12 @@ class Core:
 
     @property
     def cwd(self):
+        """Return the working directory for the project's own RTL file list."""
         return ROOT / self.folder
 
 
 def project_cores():
+    """Load the allowed core and folder pairs with strict token validation."""
     manifest = ROOT / "scripts" / "fpga_cores.txt"
     cores = []
     for line in manifest.read_text(encoding="utf-8").splitlines():
@@ -40,6 +42,7 @@ def project_cores():
 
 
 def sources(core):
+    """Read the source paths from rtl.f relative to the selected core."""
     names = shlex.split((core.cwd / "rtl.f").read_text(encoding="utf-8"), comments=True)
     if not names or any(
         not SAFE_TOKEN.fullmatch(name) or not (core.cwd / name).is_file() for name in names
@@ -49,6 +52,7 @@ def sources(core):
 
 
 def run_logged(args, cwd, log_path, timeout):
+    """Run one bounded tool operation and retain its complete log for diagnosis."""
     with (cwd / log_path).open("w", encoding="utf-8") as log:
         log.write(f"$ {shlex.join(args)}\n")
         log.flush()
@@ -60,11 +64,13 @@ def run_logged(args, cwd, log_path, timeout):
 
 
 def identify(tool, option):
+    """Capture the tool's version line for the reproducibility report."""
     result = subprocess.check_output([tool, option], text=True, stderr=subprocess.STDOUT)
     return next((line for line in reversed(result.splitlines()) if line.strip()), "unknown")
 
 
 def extract_report(report):
+    """Collect the clock and hardware resources from one nextpnr report."""
     clocks = report["fmax"]
     if len(clocks) != 1:
         raise ValueError(f"Expected one core clock, got {', '.join(clocks) or 'none'}")
@@ -82,6 +88,7 @@ def extract_report(report):
 
 
 def synthesize(core, args, output):
+    """Generate the mapped ECP5 netlist once for all selected placement seeds."""
     mapped = output / "mapped.json"
     commands = "; ".join((
         f"read_slang -I. --top {core.top} {' '.join(sources(core))}",
@@ -95,6 +102,7 @@ def synthesize(core, args, output):
 
 
 def route(core, args, output, mapped, seed):
+    """Place and route a single seed, retaining actual frequency even below target."""
     stem = f"seed-{seed}"
     report_file = output / f"{stem}.report.json"
     routed_file = output / f"{stem}.routed.json"
@@ -110,6 +118,7 @@ def route(core, args, output, mapped, seed):
 
 
 def characterize(core, args):
+    """Synthesize one core and optionally route the selected seeds."""
     output = Path("build") / "characterization"
     (core.cwd / output).mkdir(parents=True, exist_ok=True)
     mapped = synthesize(core, args, output)
@@ -119,6 +128,7 @@ def characterize(core, args):
 
 
 def markdown(rows):
+    """Format measured timing and area into a comparison table."""
     header = (
         "| Core | Seed | Target MHz | Routed MHz | Met | Comb sites | FFs | DSPs | EBRs |\n"
         "| --- | ---: | ---: | ---: | :---: | ---: | ---: | ---: | ---: |"
@@ -134,6 +144,7 @@ def markdown(rows):
 
 
 def positive(raw):
+    """Parse CLI values for counts, frequency, and timeouts."""
     number = int(raw)
     if number <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
@@ -141,6 +152,7 @@ def positive(raw):
 
 
 def main():
+    """Run the configured characterization matrix and publish its results."""
     cores = project_cores()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--core", action="append", choices=[core.top for core in cores])

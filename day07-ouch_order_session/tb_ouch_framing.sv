@@ -55,6 +55,7 @@ module tb_ouch_framing;
     packet_t frozen_frame;
     logic [72:0] frozen_tx;
 
+    // Calculate a byte pattern from packet length and byte position.
     function automatic [7:0] signature(
         input integer epoch, frame_index, byte_index
     );
@@ -62,6 +63,7 @@ module tb_ouch_framing;
                        (frame_index >> 3) ^ (byte_index * byte_index));
     endfunction
 
+    // Build a tagged test frame with deterministic body bytes.
     function automatic packet_t make_packet(
         input integer length, epoch, frame_index
     );
@@ -78,10 +80,12 @@ module tb_ouch_framing;
         end
     endfunction
 
+    // Lay out a SoupBinTCP frame with length prefix for the byte-level scoreboard.
     function automatic [WIRE_BITS-1:0] to_wire(input packet_t frame);
         to_wire = {frame.body, 8'(frame.length), 8'h00};
     endfunction
 
+    // Advance the deterministic pseudo-random sequence used as fixture data.
     function automatic [31:0] scramble(input logic [31:0] raw);
         logic [31:0] x;
         begin
@@ -151,6 +155,7 @@ module tb_ouch_framing;
         end
     end
 
+    // Queue the expected receive frame and append its bytes to the driver stream.
     task automatic add_expected(input integer length);
         packet_t new_frame;
         logic [WIRE_BITS-1:0] physical;
@@ -167,6 +172,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Check that queued complete frames precede a later malformed frame error.
     task automatic ordered_poison_rx;
         integer first_byte;
         integer drained;
@@ -191,6 +197,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Hold a receive word and its lane mask until the framer accepts it.
     task automatic rx_beat(input logic [63:0] data, input logic [7:0] keep);
         begin
             @(negedge clk);
@@ -204,6 +211,7 @@ module tb_ouch_framing;
     endtask
 
     logic [31:0] driver_seed = 32'h39c8_0741;
+    // Pack a contiguous slice of the driver stream into a single receive beat.
     task automatic send_chunk(input integer index, length);
         logic [63:0] data;
         logic [7:0] keep;
@@ -221,6 +229,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Flush the transport between independent framing campaigns.
     task automatic transport_reset;
         begin
             @(negedge clk);
@@ -235,6 +244,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Wait for the receive count to reach the expected number.
     task automatic wait_rx(input integer stop_at);
         integer wait_cycles;
         begin
@@ -247,6 +257,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Hold a complete transmit packet until the serializer captures it.
     task automatic send_tx(input packet_t frame);
         begin
             @(negedge clk);
@@ -258,6 +269,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Exercise varied receive fragmentation across supported body lengths.
     task automatic sweep_rx;
         integer chunk;
         integer offset;
@@ -281,6 +293,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Flush incomplete receive state and test the next connection's first frame.
     task automatic recovery_rx;
         integer split;
         integer started;
@@ -309,6 +322,7 @@ module tb_ouch_framing;
         end
     endtask
 
+    // Drive an invalid keep pattern or frame length and check the terminal fault.
     task automatic poison_rx;
         integer mask;
         logic valid_mask;

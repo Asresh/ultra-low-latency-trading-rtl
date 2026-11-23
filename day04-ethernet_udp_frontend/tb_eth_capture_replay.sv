@@ -60,6 +60,7 @@ module tb_eth_capture_replay;
             $fatal(1,"capture replay exceeded cycle budget");
     end
 
+    // Advance the seeded generator by one step for reproducible test patterns.
     function automatic logic [31:0] advance(input logic [31:0] x);
         logic [31:0] y;
         begin
@@ -141,6 +142,7 @@ module tb_eth_capture_replay;
         end
     end
 
+    // Load the capture replay rule image before accepting frames.
     task automatic load_rules;
         logic [255:0] raw_rule;
         integer rc;
@@ -167,6 +169,7 @@ module tb_eth_capture_replay;
         end
     endtask
 
+    // Read a fixture beat and hold it on the stream until the DUT accepts it.
     task automatic send_row;
         begin
             @(negedge clk);

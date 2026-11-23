@@ -31,6 +31,7 @@ FIELDS = {
 
 
 def numeric(value):
+    """Parse a configuration number from the supported integer or string syntax."""
     if isinstance(value, bool):
         raise ValueError("boolean is not a numeric rule field")
     if isinstance(value, int):
@@ -41,10 +42,12 @@ def numeric(value):
 
 
 def fit(value, width, label):
+    """Check that one policy value fits its declared hardware field width."""
     return bounded(numeric(value), width, label)
 
 
 def parse_match(field, value):
+    """Validate a match kind and normalize its value and mask."""
     width = FIELDS[field]
     if value == "*" or value is None:
         return Match()
@@ -59,6 +62,7 @@ def parse_match(field, value):
 
 
 def parse_rule(row):
+    """Parse one row's matches, steering action, and priority controls."""
     if not isinstance(row, dict):
         raise ValueError("each rule must be an object")
     extra = set(row)-set(FIELDS)-{"enabled", "action", "queue"}
@@ -78,6 +82,7 @@ def parse_rule(row):
 
 
 def parse_policy(document):
+    """Validate all policy rows and enforce the table size."""
     if not isinstance(document,dict) or set(document) != {"rules"}:
         raise ValueError("policy must be an object with one rules array")
     rows = document["rules"]
@@ -87,6 +92,7 @@ def parse_policy(document):
 
 
 def load_policy(path):
+    """Read a JSON policy file before converting it into hardware rows."""
     return parse_policy(json.loads(Path(path).read_text()))
 
 
@@ -99,6 +105,7 @@ class Access:
     expect: int = None
 
     def __post_init__(self):
+        """Check address alignment and bus word sizes when creating a register transaction."""
         bounded(self.address,8,"CSR address")
         if self.address % 4:
             raise ValueError("CSR access must be word-aligned")
@@ -108,6 +115,7 @@ class Access:
             bounded(self.expect,32,"expected response")
 
     def json_object(self):
+        """Export a register transaction in the command format consumed by the CLI."""
         result = {"op":"write" if self.write else "read","address":f"0x{self.address:02x}"}
         if self.write:
             result.update(value=f"0x{self.value:08x}", strobe=self.strobe)
@@ -117,14 +125,17 @@ class Access:
 
 
 def access_read(address, expect=None):
+    """Construct an aligned read request with its verification label."""
     return Access(False,address,strobe=0,expect=expect)
 
 
 def access_write(address, value):
+    """Construct a register write with its explicit data word and byte enables."""
     return Access(True,address,value)
 
 
 def policy_plan(rules, *, expected_epoch=None, verify_words=True):
+    """Build the ordered reads and writes for one checked atomic policy replacement."""
     if len(rules) > RULE_COUNT:
         raise ValueError("too many rules")
     if expected_epoch is not None:
@@ -150,6 +161,7 @@ def policy_plan(rules, *, expected_epoch=None, verify_words=True):
 
 
 def snapshot_plan(indexes, *, clear=False):
+    """List register accesses needed to read one coherent counter snapshot."""
     if len(set(indexes)) != len(indexes):
         raise ValueError("snapshot plan contains a duplicate counter")
     yield access_write(CSR_SNAPSHOT,1)
@@ -172,9 +184,11 @@ class Control:
     """Transport-agnostic master. The transport callable returns (status, value)."""
 
     def __init__(self, transport):
+        """Attach the register transport used for policy updates and snapshots."""
         self.transact = transport
 
     def execute(self, plan):
+        """Execute an access and reject status or readback values that break the plan."""
         for request in plan:
             status, response = self.transact(request)
             if status:
@@ -186,6 +200,7 @@ class Control:
             yield response
 
     def replace_policy(self, rules, *, verify_words=True):
+        """Write and read back inactive rules before committing the new table."""
         old_epoch, = self.execute([access_read(CSR_EPOCH)])
         replies = list(self.execute(policy_plan(
             rules,expected_epoch=old_epoch,verify_words=verify_words
@@ -193,6 +208,7 @@ class Control:
         return replies[-1]
 
     def snapshot(self, indexes, *, clear=False):
+        """Read and verify one snapshot epoch, optionally clearing counters afterward."""
         indexes = tuple(indexes)
         replies = list(self.execute(snapshot_plan(indexes)))
         opening, closing = replies[1], replies[-1]
@@ -208,6 +224,7 @@ class Control:
 
 
 def main():
+    """Read command-line policy or counter options and emit the selected transaction plan."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     rule = commands.add_parser("rules")

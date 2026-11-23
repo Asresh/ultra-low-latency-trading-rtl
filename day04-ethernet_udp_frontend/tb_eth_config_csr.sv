@@ -72,6 +72,7 @@ module tb_eth_config_csr;
         end
     end
 
+    // Drive one CSR access with the requested operation, address, data, and strobes.
     task automatic begin_access(input logic wr, input logic [7:0] address,
                                 input logic [31:0] data, input logic [3:0] lanes);
         begin
@@ -87,6 +88,7 @@ module tb_eth_config_csr;
         end
     endtask
 
+    // Wait for a CSR response and check status, data, and hold behavior.
     task automatic expect_reply(input logic [1:0] code, input logic [31:0] data,
                                  input integer delay_response);
         begin
@@ -105,6 +107,7 @@ module tb_eth_config_csr;
         end
     endtask
 
+    // Complete a CSR transaction and compare its final response.
     task automatic reg_access(input logic wr, input logic [7:0] address,
                               input logic [31:0] value, input logic [3:0] lanes,
                               input logic [1:0] code, input logic [31:0] expected);
@@ -114,11 +117,13 @@ module tb_eth_config_csr;
         end
     endtask
 
+    // Issue a checked write to the addressed CSR.
     task automatic write_word(input logic [7:0] address, input logic [31:0] value,
                               input logic [31:0] expected);
         reg_access(1,address,value,4'hf,2'd0,expected);
     endtask
 
+    // Read an addressed CSR and check its expected 32-bit value.
     task automatic read_word(input logic [7:0] address, input logic [31:0] expected);
         reg_access(0,address,32'd0,4'd0,2'd0,expected);
     endtask

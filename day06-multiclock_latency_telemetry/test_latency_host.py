@@ -21,6 +21,7 @@ from verify_latency_capture import verify_histograms, verify_traces
 
 
 def event_pair(tag, delay, group=0, timestamp=1000, probe_a=1, probe_b=2):
+    """Build two endpoints with the requested tag and tick separation."""
     a = Observation(200, tag, group, probe_a, False)
     b = Observation(200 + delay, tag, group, probe_b, True)
     return Report.pair(a, b, timestamp)
@@ -28,12 +29,14 @@ def event_pair(tag, delay, group=0, timestamp=1000, probe_a=1, probe_b=2):
 
 class ModelRules(unittest.TestCase):
     def test_group_is_part_of_hash_and_key(self):
+        """Cover the group is part of hash and key regression case."""
         g = Geometry()
         self.assertEqual(g.key_bits(Observation(0, 0x587, 3, 1, False)), 0x3587)
         event = Observation(0, 0x543, 2, 1, False)
         self.assertEqual(g.set_of(event), 6)
 
     def test_out_of_order_and_counter_wrap(self):
+        """Cover the out of order and counter wrap regression case."""
         a = Observation(LIMIT64 - 1, 11, 0, 1, False)
         b = Observation(3, 11, 0, 2, True)
         report = Report.pair(b, a, 10)
@@ -47,6 +50,7 @@ class ModelRules(unittest.TestCase):
         self.assertEqual(read_event(invalid.transport_word()), invalid)
 
     def test_same_endpoint_is_not_a_pair(self):
+        """Cover the same endpoint is not a pair regression case."""
         a = Observation(1, 1, 0, 0, False)
         with self.assertRaisesRegex(ValueError, "opposite"):
             Report.pair(a, a, 10)
@@ -54,6 +58,7 @@ class ModelRules(unittest.TestCase):
             Report.pair(a, Observation(2, 2, 1, 1, True), 10)
 
     def test_held_model_report_and_flush_fence(self):
+        """Cover the held model report and flush fence regression case."""
         g = Geometry(scan_log=2)
         f = Correlator(g)
         start = Observation(0, 3, 0, 0, False)
@@ -72,6 +77,7 @@ class ModelRules(unittest.TestCase):
         self.assertIsNone(fresh.visible)
 
     def test_bucket_range_edges_and_saturation(self):
+        """Cover the bucket range edges and saturation regression case."""
         plain = [0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, LIMIT64]
         self.assertEqual([bucket_of(x, 8) for x in plain], [0, 1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 7])
         self.assertEqual(bucket_bounds(4, 8), (4, 7))
@@ -86,6 +92,7 @@ class ModelRules(unittest.TestCase):
 
 class WireFailures(unittest.TestCase):
     def test_text_binary_and_csv(self):
+        """Cover the text binary and csv regression case."""
         event = event_pair(2, 7)
         word = event.transport_word()
         text = io.StringIO(f"0x{word:080X} # row 1\n\n{word:080x}\n")
@@ -101,6 +108,7 @@ class WireFailures(unittest.TestCase):
             list(read_words(io.StringIO("0777"), 320))
 
     def test_corrupt_event_details(self):
+        """Cover the corrupt event details regression case."""
         word = event_pair(33, 7).transport_word()
         with self.assertRaisesRegex(CaptureError, "reserved"):
             read_event(word | (1 << 260))
@@ -113,6 +121,7 @@ class WireFailures(unittest.TestCase):
             read_event(damaged)
 
     def test_histogram_class_and_rank_validation(self):
+        """Cover the histogram class and rank validation regression case."""
         data = list(histogram_words([[1, 2, 4, 7, 33, 37], [], [1, 1]], 10, 0, 55))
         frame = list(histogram_frames(data, 3))[0]
         self.assertEqual((frame.frame_id, frame.cut_tick), (0, 55))
@@ -135,6 +144,7 @@ class WireFailures(unittest.TestCase):
             list(histogram_frames(data + data, 3))
 
     def test_window_wrap_and_trace_restrictions(self):
+        """Cover the window wrap and trace restrictions regression case."""
         probe = [event_pair(i, i+1, timestamp=500+i) for i in range(12)]
         keep = bounded_trace(probe, 8, 2, 0, 10, frame_id=LIMIT64 & 0xFFFFFFFF)
         self.assertIsInstance(keep, CapturedTrace)
@@ -152,6 +162,7 @@ class WireFailures(unittest.TestCase):
             list(trace_frames([words[0] ^ (1 << 42), *words[1:]], first_id=None))
 
     def test_capture_cross_checks(self):
+        """Cover the capture cross checks regression case."""
         reports = [event_pair(i, i+5, timestamp=20+i) for i in range(8)]
         raw = [(r.observed_tick+2, r) for r in reports]
         h = list(histogram_frames(
@@ -168,11 +179,13 @@ class WireFailures(unittest.TestCase):
 
 class ClockAndProfiling(unittest.TestCase):
     def test_precise_q32_rounding(self):
+        """Cover the precise q32 rounding regression case."""
         self.assertEqual(nearest_fixed(Fraction(1, 2), 1), 0)
         self.assertEqual(nearest_fixed(Fraction(3, 2), 1), 2)
         self.assertEqual(nearest_fixed(Fraction(1, 3), 8), 3)
 
     def test_pps_wrap_loss_and_noisy_point(self):
+        """Cover the PPS wrap loss and noisy point regression case."""
         samples = []
         start = LIMIT64 - 2 * 125000000
         for i in range(30):
@@ -188,6 +201,7 @@ class ClockAndProfiling(unittest.TestCase):
         self.assertEqual(estimate.as_json(armed=True)["writes"][-1]["value"], "0x00000011")
 
     def test_nominal_clock_reject_and_bad_input(self):
+        """Cover the nominal clock reject and bad input regression case."""
         rows = io.StringIO("second,tick,reference_ns\n1,0x40,1000\n2,0x50,2000\n")
         points = list(read_pps(rows))
         self.assertEqual(points, [PPS(1, 64, 1000), PPS(2, 80, 2000)])
@@ -201,6 +215,7 @@ class ClockAndProfiling(unittest.TestCase):
             list(read_pps(io.StringIO("issued,time\n10,30\n")))
 
     def test_paths_are_independent_under_budget(self):
+        """Cover the paths are independent under budget regression case."""
         a, baseline = Profile(), Profile()
         for i, delay in enumerate((4, 8, 15, 20, 42)):
             a.add(event_pair(i, delay, timestamp=100+i*3))
@@ -218,6 +233,7 @@ class ClockAndProfiling(unittest.TestCase):
         self.assertEqual(a.meets(PathBudget(*key, Fraction(1), 40, 1))["verdict"], "over_budget")
 
     def test_rank_and_cdf_exact_examples(self):
+        """Cover the rank and cdf exact examples regression case."""
         self.assertEqual(quantile([3, 4], Fraction(1, 2)).value, 3)
         self.assertEqual(quantile([3, 4], Fraction(51, 100)).value, 4)
         self.assertIsNone(quantile([], Fraction(1)))

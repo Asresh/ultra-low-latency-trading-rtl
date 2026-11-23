@@ -17,6 +17,7 @@ class JournalError(ValueError):
 
 
 def exact_keys(obj: Dict, names: Iterable[str], label: str) -> None:
+    """Reject missing or unrecognized journal fields before decoding the row."""
     wanted = set(names)
     got = set(obj)
     if got != wanted:
@@ -24,16 +25,19 @@ def exact_keys(obj: Dict, names: Iterable[str], label: str) -> None:
 
 
 def bounded(value: int, high: int, label: str) -> None:
+    """Check that a journal integer fits its permitted unsigned range."""
     if type(value) is not int or not 0 <= value <= high:
         raise JournalError(f"{label}={value!r} is outside 0..{high}")
 
 
 def boolean(value: bool, label: str) -> None:
+    """Require an explicit Boolean rather than accepting arbitrary truthy values."""
     if type(value) is not bool:
         raise JournalError(f"{label} must be JSON true or false")
 
 
 def decode_mapping(row: Dict, record, label: str):
+    """Validate data keys against the expected nested journal record."""
     if row is None:
         return None
     if not isinstance(row, dict):
@@ -51,6 +55,7 @@ class Entry:
 
     @classmethod
     def parse(cls, row: Dict, config: Config) -> "Entry":
+        """Decode one structured journal entry and validate its field types and ranges."""
         if not isinstance(row, dict):
             raise JournalError("journal entry must be an object")
         exact_keys(row, (field.name for field in fields(Journal)), "entry")
@@ -110,6 +115,7 @@ class Entry:
 
 
 def read_config(source: TextIO) -> Tuple[Config, str]:
+    """Read the journal's geometry and scenario metadata before data rows."""
     try:
         header = json.loads(next(source))
     except (StopIteration, ValueError) as exc:
@@ -138,6 +144,7 @@ def read_config(source: TextIO) -> Tuple[Config, str]:
 
 
 def read_entries(source: TextIO, config: Config) -> Iterator[Entry]:
+    """Yield validated numbered journal entries without reading the entire file at once."""
     for number, row in enumerate(source, start=2):
         try:
             yield Entry.parse(json.loads(row), config)
@@ -157,16 +164,19 @@ class Window:
     max_size: int = 0
 
     def advance(self, cycle: int, *, live: bool, eligible: bool) -> None:
+        """Accumulate the live and eligible cycle counts for this instrument window."""
         self.last = cycle
         self.eligible_cycles += int(eligible)
         self.live_cycles += int(live)
 
     def mapped(self) -> Dict:
+        """Export the window's cycle interval and counters in stable key order."""
         return {**asdict(self), "cycles": self.last-self.first+1}
 
 
 class Audit:
     def __init__(self, cfg: Config):
+        """Create independent replay audit counters and per-instrument trackers."""
         self.cfg = cfg
         self.cycle = -1
         self.pending: Deque[Command] = deque()
@@ -184,10 +194,12 @@ class Audit:
         self.reset_seen = False
 
     def require(self, flag: bool, message: str) -> None:
+        """Raise a journal error with current-cycle context if an invariant fails."""
         if not flag:
             raise JournalError(f"cycle {self.cycle}: {message}")
 
     def check_reset(self, entry: Entry) -> None:
+        """Check reset behavior on all streams and discard the old tracked state."""
         row = entry.register
         self.require(not entry.command and not entry.response and not entry.quote,
                      "reset published a payload")
@@ -208,6 +220,7 @@ class Audit:
         self.held_quote = None
 
     def check_response(self, entry: Entry) -> None:
+        """Correlate a response with its accepted request and check stalled fields."""
         rsp = entry.response
         row = entry.register
         self.require((rsp is not None) == bool(self.pending),
@@ -246,6 +259,7 @@ class Audit:
             self.count["response_stall_cycles"] += 1
 
     def check_source(self, entry: Entry) -> None:
+        """Verify the producer holds a pending request until the handshake."""
         row = entry.register
         self.require(row.source_ready == (entry.response is None or row.response_ready),
                      "source ready lacks response capacity or blocked unnecessarily")
@@ -262,6 +276,7 @@ class Audit:
             self.count["source_stall_cycles"] += 1
 
     def action_for(self, quote: Optional[Quote], info: Journal) -> str:
+        """Determine whether a transferred quote has permission to become active."""
         if quote is None:
             return "idle"
         if not info.quote_ready:
@@ -275,6 +290,7 @@ class Audit:
         return "publish_intent" if quote.active else "withdraw_intent"
 
     def enforce_gates(self, row: Journal) -> None:
+        """Remove previously applied quotes whose tracked gate or epoch no longer permits them."""
         invalid = [
             bank for bank, quote in sorted(self.visible.items())
             if not row.eligible[bank] or row.epochs[bank] != quote.epoch
@@ -285,6 +301,7 @@ class Audit:
         self.count["gate_revokes"] += len(invalid)
 
     def check_quote(self, entry: Entry) -> None:
+        """Check publication order, reset behavior, and replication of held quote fields."""
         row = entry.register
         quote = entry.quote
         action = self.action_for(quote, row)
@@ -322,6 +339,7 @@ class Audit:
             self.visible.pop(bank, None)
 
     def update_windows(self, entry: Entry) -> None:
+        """Update instrument activity and safety windows from this journal cycle."""
         row = entry.register
         for bank in range(self.cfg.banks):
             if row.live[bank]:
@@ -353,6 +371,7 @@ class Audit:
                 window.rejected += 1
 
     def visit(self, entry: Entry) -> None:
+        """Run the independent checks in bus order before advancing the audit cycle."""
         row = entry.register
         self.require(row.cycle == self.cycle+1, f"nonconsecutive row {row.cycle}")
         self.cycle = row.cycle
@@ -367,6 +386,7 @@ class Audit:
         self.reset_seen = row.reset
 
     def finish(self) -> Dict:
+        """Return the summary after verifying the journal ended coherently."""
         self.require(self.cycle >= 0, "empty journal")
         self.require(not self.pending and self.held_quote is None,
                      "journal ends before diagnostics and publication drain")
@@ -384,6 +404,7 @@ class Audit:
 
 
 def audit_stream(source: TextIO) -> Dict:
+    """Read metadata and stream all rows through the independent journal checker."""
     cfg, profile = read_config(source)
     audit = Audit(cfg)
     for entry in read_entries(source, cfg):
@@ -398,6 +419,7 @@ WINDOW_COLUMNS = (
 
 
 def export_rows(entries: Iterable[Entry], bank: Optional[int], first: int, last: int) -> Iterable[Dict]:
+    """Select journal cycles and optionally restrict them to one instrument."""
     for entry in entries:
         row = entry.register
         if row.cycle < first or row.cycle > last:
@@ -421,6 +443,7 @@ def export_rows(entries: Iterable[Entry], bank: Optional[int], first: int, last:
 
 
 def main() -> None:
+    """Audit or export the requested region of a journal from command-line input."""
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="operation", required=True)
     audit = actions.add_parser("audit", help="verify journal structure, handshake, and consumer decisions")

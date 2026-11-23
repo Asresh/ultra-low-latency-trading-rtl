@@ -22,6 +22,7 @@ class Drive:
 
 class Campaign:
     def __init__(self, geometry, sink):
+        """Initialize stimulus generation, the reference correlator and output storage."""
         self.geometry = geometry
         self.model = Correlator(geometry)
         self.sink = sink
@@ -32,6 +33,7 @@ class Campaign:
         self.cycles = 0
 
     def cycle(self, drive=Drive()):
+        """Drive one simulated edge and save the model observation in the test fixture."""
         self.tick = (self.tick + drive.delta) & LIMIT64
         visible = self.model.step(
             tick=self.tick,
@@ -59,9 +61,11 @@ class Campaign:
         return visible
 
     def endpoint(self, tag, start, lag=1, group=0, probe=0):
+        """Build one tagged observation with the requested age and probe identity."""
         return Observation((self.tick - lag) & LIMIT64, tag, group, probe, is_end=not start)
 
     def send(self, event, *, timeout=60, armed=True, sink_ready=True):
+        """Drive one observation and hold it stable until the model accepts it."""
         held = Drive(event, sink_ready=sink_ready, armed=armed, timeout=timeout)
         for _ in range(256):
             if self.cycle(held).ready:
@@ -69,10 +73,12 @@ class Campaign:
         raise AssertionError("synthetic writer could not advance")
 
     def idle(self, cycles, *, timeout=60, sink_ready=True):
+        """Advance the reference clock while no new request is presented."""
         for _ in range(cycles):
             self.cycle(Drive(sink_ready=sink_ready, timeout=timeout))
 
     def collide(self, group, amount):
+        """Generate multiple live keys that hash to the same set."""
         found = {}
         limit = 1 << self.geometry.tag_width
         for tag in range(limit):
@@ -85,6 +91,7 @@ class Campaign:
         raise ValueError("tag width is too small for requested collisions")
 
     def directed(self):
+        """Exercise specifically chosen transaction and timing boundaries."""
         self.cycle(Drive(reset=True))
         self.send(self.endpoint(14, start=True), armed=False)
         self.send(self.endpoint(15, start=True, lag=-100))
@@ -111,6 +118,7 @@ class Campaign:
         self.cycle(Drive(reset=True, sink_ready=False))
 
     def randomized(self, rng, steps):
+        """Generate a repeatable sequence of mixed legal and exceptional transactions."""
         queue = deque()
         sequence = rng.randrange(1 << self.geometry.tag_width)
         scenarios = (
@@ -164,10 +172,12 @@ class Campaign:
 
 
 def modular_prior(a, b):
+    """Compare ticks for chronological order in the unsigned wraparound domain."""
     return ((a - b) & LIMIT64) >= HALF64
 
 
 def run_campaign(args):
+    """Generate and write one correlator campaign at the chosen geometry."""
     profile = Geometry(index_width=args.index_width, scan_log=args.scan_log)
     with args.output.open("w", encoding="ascii") as output:
         campaign = Campaign(profile, output)
@@ -184,6 +194,7 @@ def run_campaign(args):
 
 
 def histogram_campaign(args):
+    """Generate independent histogram inputs and framed expected words."""
     rng = random.Random(args.seed)
     classes = 4
     bin_count = 12
@@ -210,6 +221,7 @@ def histogram_campaign(args):
 
 
 def main():
+    """Generate a latency campaign from command-line settings."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("suite", choices=("correlator", "histogram"))
     parser.add_argument("output", type=Path)

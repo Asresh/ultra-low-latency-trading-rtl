@@ -9,6 +9,7 @@ from net_wire import Result, parse_frame
 
 class FaultMatrixTests(unittest.TestCase):
     def test_each_mutation_across_vlan_options_and_odd_payload(self):
+        """Check that each mutation across VLAN options and odd payload."""
         for tag_depth in range(3):
             tags=tuple((0x8100,i+1) for i in range(tag_depth))
             for options in (b"",b"\x01"*4,b"\x01"*40):
@@ -21,8 +22,10 @@ class FaultMatrixTests(unittest.TestCase):
                             self.assertEqual(parse_frame(output.original.serialize()).result,Result.OK)
 
     def test_sample_constructs_repeatable_coverage_and_trims_to_bound(self):
+        """Check that sample constructs repeatable coverage and trims to bound."""
         packet=standard(bytes(300),tags=((0x88a8,33),(0x8100,45)),options=b"\x01"*40)
         def cases(seed):
+            """Yield representative packet configurations for the protocol mutation tests."""
             return list(sample(random.Random(seed),lambda:packet,80,160))
         a=cases(17)
         b=cases(29)
@@ -35,6 +38,7 @@ class FaultMatrixTests(unittest.TestCase):
             self.assertGreater(histogram[expected],0)
 
     def test_lower_layer_first_marker_fault_preserves_original_wire(self):
+        """Check that lower layer first marker fault preserves original wire."""
         packet=standard(b"a unique payload")
         result=mutate(packet,Fault.RX_FIRST,random.Random(33))
         self.assertEqual(result.wire,packet.serialize(include_pad=False))
@@ -42,6 +46,7 @@ class FaultMatrixTests(unittest.TestCase):
         self.assertEqual(observe(result,256),Result.BAD_AXIS)
 
     def test_empty_sample_cannot_claim_coverage(self):
+        """Check that empty sample cannot claim coverage."""
         with self.assertRaisesRegex(ValueError,"at least"):
             list(sample(random.Random(0),lambda:standard(),1,256))
 

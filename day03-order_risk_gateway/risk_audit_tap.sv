@@ -43,6 +43,7 @@ module risk_audit_tap #(
     assign a_valid = !rst && used != '0;
     assign a_record = buffer[read_ptr];
 
+    // Advance the audit queue pointer, wrapping explicitly at its configured depth.
     function automatic [PTR_W-1:0] next_ptr(input [PTR_W-1:0] old);
         next_ptr = old == LAST ? '0 : old + 1'b1;
     endfunction

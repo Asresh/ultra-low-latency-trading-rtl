@@ -15,6 +15,7 @@ REPLACE = struct.Struct(">QII")
 QUANTITY = struct.Struct(">I")
 
 
+# Encode a session, first sequence, and length-prefixed messages as one MoldUDP64 datagram.
 def make_packet(session, first, messages=(), *, declared_count=None):
     """Build a downstream MoldUDP64 packet, allowing injected header errors."""
     if len(session) != 10:
@@ -24,6 +25,7 @@ def make_packet(session, first, messages=(), *, declared_count=None):
             b"".join(LENGTH.pack(len(message)) + message for message in messages))
 
 
+# Encode a recovery request for count consecutive messages starting at first.
 def make_request(session, first, count):
     return int.from_bytes(HEADER.pack(session, first & MASK64, count), "big")
 
@@ -36,18 +38,22 @@ class Downstream:
     messages: tuple
 
     @property
+    # Identify the zero-count datagram used to advance the advertised sequence.
     def is_heartbeat(self):
         return self.block_count == 0
 
     @property
+    # Identify the reserved count that ends a session.
     def is_end(self):
         return self.block_count == 65535
 
+    # Pair each payload with its sequence, wrapping at the wire's 64-bit boundary.
     def numbered_messages(self):
         for index, payload in enumerate(self.messages):
             yield (self.first + index) & MASK64, payload
 
 
+# Validate the header, every block, and datagram bounds before exposing any message.
 def decode_packet(packet, packet_limit=1536, message_limit=64, block_limit=64):
     if len(packet) < HEADER.size:
         raise ValueError("truncated header")
@@ -93,6 +99,7 @@ class ItchRecord:
     printable: int = 0
     mpid: int = 0
 
+    # Pack normalized event fields in the order used by the receiver's RTL output.
     def bits(self):
         widths = [2, 2, 64, 64, 8, 16, 16, 48, 64, 64, 8, 32, 64, 32, 64, 8, 32]
         columns = [
@@ -109,6 +116,7 @@ class ItchRecord:
         return word
 
 
+# Convert one supported ITCH payload and its Mold sequence to a normalized event.
 def decode_itch(sequence, payload):
     kind = payload[0] if payload else 0
     if not payload:
@@ -145,6 +153,7 @@ def decode_itch(sequence, payload):
     return ItchRecord(*base)
 
 
+# Build a supported ITCH payload with reproducible randomized field values.
 def make_itch(kind, rng):
     common = COMMON.pack(
         rng.getrandbits(16),
@@ -175,6 +184,7 @@ def make_itch(kind, rng):
     return kind.encode("ascii") + common + tail
 
 
+# Split a packet into little-endian bus beats with byte enables and frame markers.
 def words(packet, rng):
     if not packet:
         raise ValueError("test input must contain a datagram byte")

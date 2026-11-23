@@ -55,18 +55,22 @@ module ouch_order_table #(
     assign pending_count = pending_total;
     assign query_view = query_entry.view;
 
+    // Check that the time-in-force code is supported by this gateway subset.
     function automatic logic tif_allowed(input logic [7:0] tif);
         tif_allowed = tif == "0" || tif == "3" || tif == "5";
     endfunction
 
+    // Check that the requested display mode is supported.
     function automatic logic display_allowed(input logic [7:0] display);
         display_allowed = display == "Y" || display == "N";
     endfunction
 
+    // Validate the wire-format limit price before comparing or storing quantities.
     function automatic logic price_allowed(input logic [63:0] price);
         price_allowed = price != 0 && price <= MAX_LIMIT_PRICE;
     endfunction
 
+    // Compare a price against the stored limit using the order side.
     function automatic logic better_or_equal(
         input logic [63:0] accepted, input logic [63:0] requested,
         input logic [7:0] side
@@ -76,10 +80,12 @@ module ouch_order_table #(
                           (side == "S" && accepted >= requested));
     endfunction
 
+    // Check that a venue status byte agrees with the remaining quantity.
     function automatic logic valid_order_state(input logic [7:0] encoding, input logic [31:0] qty);
         valid_order_state = encoding == "D" || (encoding == "L" && qty != 0);
     endfunction
 
+    // Remove the in-flight request fields while retaining the live order identity.
     function automatic order_state_t clear_pending(input order_state_t before_value);
         order_state_t result;
         begin
@@ -91,6 +97,7 @@ module ouch_order_table #(
         end
     endfunction
 
+    // Clear pending transaction fields and mark the live order as terminal.
     function automatic order_state_t close_order(input order_state_t before_value);
         order_state_t result;
         begin

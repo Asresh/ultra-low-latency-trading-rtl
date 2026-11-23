@@ -26,6 +26,7 @@ module matching_fifo #(
     wire push = s_valid && s_ready;
     wire pop = m_valid && m_ready;
 
+    // Wrap a FIFO pointer at the configured depth, including non-power-of-two depths.
     function automatic [PTR_W-1:0] advance(input [PTR_W-1:0] ptr);
         advance = (ptr == PTR_W'(DEPTH-1)) ? PTR_W'(0) : ptr + PTR_W'(1);
     endfunction

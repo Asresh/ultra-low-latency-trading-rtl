@@ -75,6 +75,7 @@ module tb_histogram_swap;
         end
     end
 
+    // Send one latency sample for the selected group and duration.
     task automatic sample(input logic group, input integer duration);
         begin
             sample_valid = 1;

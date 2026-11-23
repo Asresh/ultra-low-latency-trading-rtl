@@ -39,6 +39,7 @@ module tb_quote_publication;
     integer blocked_cycles, withdrawals, dirty_changes_on_hold, max_wait, resets_with_pending;
     logic [31:0] rng = 32'h071f_92c5;
 
+    // Advance the deterministic random generator and return a value below the bound.
     function automatic integer dice(input integer modulus);
         rng = rng ^ (rng << 13);
         rng = rng ^ (rng >> 17);
@@ -46,6 +47,7 @@ module tb_quote_publication;
         dice = int'(rng % $unsigned(modulus));
     endfunction
 
+    // Test whether one lane still needs a publication in the scoreboard.
     function automatic bit dirty(input integer bank);
         logic [KW-1:0] value;
         bit refresh;
@@ -55,6 +57,7 @@ module tb_quote_publication;
             (value[KW-1] && refresh && present_bank != bank);
     endfunction
 
+    // Clear the software-style publication state before driving directed tests.
     task automatic oracle_reset;
         turn = 0;
         present_bank = -1;
@@ -74,6 +77,7 @@ module tb_quote_publication;
         end
     endtask
 
+    // Transfer the current expected quote and update the consumer's observed state.
     task automatic consume;
         logic [KW-1:0] current;
         integer lane;
@@ -88,6 +92,7 @@ module tb_quote_publication;
         end
     endtask
 
+    // Check that the currently visible quote's epoch and eligibility still apply.
     task automatic observe_applicability;
         logic [KW-1:0] current;
         for (integer bank = 0; bank < BANKS; bank++) begin
@@ -104,6 +109,7 @@ module tb_quote_publication;
         end
     endtask
 
+    // Change one instrument's desired quote using the requested values.
     task automatic update_intent(
         input integer bank, input bit active, input integer epoch, input integer variation
     );
@@ -117,6 +123,7 @@ module tb_quote_publication;
         end
     endtask
 
+    // Compare one publication cycle to the independent scoreboard and advance it.
     task automatic check_and_advance(input integer step);
         integer next_bank, probe;
         if (rst) begin

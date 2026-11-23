@@ -1,0 +1,22 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 22
+cover: mode cover
+cover: depth 22
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -sv replay_event_store.sv timestamped_stream_replayer.sv formal_replayer.sv
+prep -top formal_replayer
+
+[files]
+../replay_codes.svh
+../replay_event_store.sv
+../timestamped_stream_replayer.sv
+formal_replayer.sv

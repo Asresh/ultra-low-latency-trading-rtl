@@ -34,6 +34,7 @@ module policy_trial #(
     integer up_cases = 0, down_cases = 0, tie_threshold = 0, clipped_cases = 0;
     integer QtyValues [0:8];
 
+    // Bound a reference quote price to the permitted tick range.
     function automatic integer clamp(input integer price);
         if (price < 0)
             clamp = 0;
@@ -43,6 +44,7 @@ module policy_trial #(
             clamp = price;
     endfunction
 
+    // Apply a quote-policy case and compare its price, size, and rejection reason.
     task automatic trial(
         input bit enabled, input bit present_bid, input bit present_ask,
         input integer px_bid, input integer px_ask,

@@ -12,6 +12,7 @@ class Beat:
     command: Command
     gap: int = 0
 
+    # Serialize a command and its source delay in the bench's input field order.
     def line(self) -> str:
         return " ".join(str(value) for value in (*self.command.vector(), self.gap))
 
@@ -22,15 +23,18 @@ class Scenario:
     beats: List[Beat]
     schedule: List[Tuple[bool, bool]]
 
+    # Assign the next tag and append a scheduled command to this scenario.
     def add(self, command: Command, gap: int = 0) -> None:
         tagged = replace(command, tag=len(self.beats) & 0xFFFF)
         self.beats.append(Beat(tagged, gap))
 
+    # Append an iterable of commands with no extra source delays.
     def extend(self, commands: Iterable[Command]) -> None:
         for command in commands:
             self.add(command)
 
 
+# Construct a new limit order and select the side and time-in-force policy.
 def new(
     instrument: int, order_id: int, price: int, quantity: int,
     side: bool = False, tif: int = TimeInForce.GTC,
@@ -46,16 +50,19 @@ def new(
     )
 
 
+# Construct a cancellation that identifies the instrument and order slot.
 def cancel(instrument: int, order_id: int) -> Command:
     return Command(instrument=instrument, opcode=Opcode.CANCEL, order_id=order_id)
 
 
+# Construct a reduction for the named order and desired decrease quantity.
 def reduce(instrument: int, order_id: int, quantity: int) -> Command:
     return Command(
         instrument=instrument, opcode=Opcode.REDUCE, order_id=order_id, quantity=quantity
     )
 
 
+# Construct a tagged query for aggregate quantity and order count at one price level.
 def level(instrument: int, price: int, side: bool, tag_id: int = 0) -> Command:
     return Command(
         instrument=instrument,
@@ -66,6 +73,7 @@ def level(instrument: int, price: int, side: bool, tag_id: int = 0) -> Command:
     )
 
 
+# Exercise command validation, simple matching, and query results for one instrument.
 def basic_tape(p: Profile, bank: int) -> List[Command]:
     edge = p.prices - 1
     peak = p.qty_max
@@ -95,6 +103,7 @@ def basic_tape(p: Profile, bank: int) -> List[Command]:
     ]
 
 
+# Exercise queue order, middle-order edits, and priority after matching.
 def queue_tape(p: Profile, bank: int) -> List[Command]:
     if p.slots < 5 or p.prices < 3:
         return []
@@ -123,6 +132,7 @@ def queue_tape(p: Profile, bank: int) -> List[Command]:
     ]
 
 
+# Fill the available slots and probe rejection and recovery while storage is full.
 def full_tape(p: Profile, bank: int) -> List[Command]:
     edge = p.prices - 1
     orders = [
@@ -137,6 +147,7 @@ def full_tape(p: Profile, bank: int) -> List[Command]:
     return orders
 
 
+# Drive quantities near their field maximum and query the wider level total.
 def aggregate_tape(p: Profile, bank: int) -> List[Command]:
     edge = p.prices - 1
     adds = [new(bank, i, edge, p.qty_max) for i in range(p.slots)]
@@ -150,6 +161,7 @@ def aggregate_tape(p: Profile, bank: int) -> List[Command]:
     return [*adds, *queries, *cancels, level(bank, edge, False)]
 
 
+# Yield commands from several instrument tapes in round-robin order.
 def interleave(*tapes: List[Command]) -> Iterable[Command]:
     for position in range(max((len(tape) for tape in tapes), default=0)):
         for tape in tapes:
@@ -157,6 +169,7 @@ def interleave(*tapes: List[Command]) -> Iterable[Command]:
                 yield tape[position]
 
 
+# Generate a reproducible random command biased toward live slots and boundary values.
 def adversarial_command(
     p: Profile, rng: Random, banks: List[Book], cursor: int,
 ) -> Command:
@@ -196,10 +209,12 @@ def adversarial_command(
     return new(instrument, order_id, price, qty, side, tif)
 
 
+# Return a schedule with reset startup followed by an unrestricted output sink.
 def default_sink(cycles: int) -> List[Tuple[bool, bool]]:
     return [(True, False), (True, False), *[(False, True)] * cycles]
 
 
+# Generate reproducible sink stalls independent of the command RNG.
 def stress_sink(seed: int, commands: int) -> List[Tuple[bool, bool]]:
     rng = Random(seed ^ 0x4AC1)
     rows = default_sink(29)
@@ -210,6 +225,7 @@ def stress_sink(seed: int, commands: int) -> List[Tuple[bool, bool]]:
     return rows
 
 
+# Combine directed tapes with model-aware randomized traffic and random backpressure.
 def stress(p: Profile, commands: int, seed: int) -> Scenario:
     result = Scenario("stress", [], stress_sink(seed, commands))
     books = [Book(p) for _ in range(p.banks)]
@@ -241,6 +257,7 @@ def stress(p: Profile, commands: int, seed: int) -> Scenario:
     return result
 
 
+# Exercise repeated reset while commands and output events are in flight.
 def reset_storm(p: Profile) -> Scenario:
     schedule = default_sink(3)
     schedule += [(False, False)] * 44
@@ -265,6 +282,7 @@ def reset_storm(p: Profile) -> Scenario:
     return result
 
 
+# Generate regular queries to measure latency and shared egress throughput for selected banks.
 def benchmark(p: Profile, banks: int) -> Scenario:
     if not 1 <= banks <= p.banks:
         raise ValueError("benchmark needs between one and all implemented banks")
@@ -276,6 +294,7 @@ def benchmark(p: Profile, banks: int) -> Scenario:
     return result
 
 
+# Yield the regression's named directed, stress, reset, and benchmark runs.
 def scenarios(p: Profile, commands: int, seed: int) -> Iterable[Scenario]:
     yield stress(p, commands, seed)
     yield reset_storm(p)

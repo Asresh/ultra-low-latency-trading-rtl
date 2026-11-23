@@ -19,14 +19,17 @@ class CheckpointError(ValueError):
 
 
 def formatted(data) -> bytes:
+    """Serialize stable JSON bytes so the same checkpoint yields the same digest."""
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
 
 def digest(data) -> str:
+    """Hash the canonical serialized checkpoint payload."""
     return sha256(formatted(data)).hexdigest()
 
 
 def field_int(obj: Mapping, field: str, maximum: int, context: str) -> int:
+    """Read and bound one integer from a checkpoint record with field context."""
     value = obj.get(field)
     if type(value) is not int or not 0 <= value <= maximum:
         raise CheckpointError(f"{context}.{field} should be integer 0..{maximum}, received {value!r}")
@@ -41,6 +44,7 @@ class Image:
     orders: Tuple[Tuple[int, Order], ...]
 
     def payload(self) -> Dict:
+        """Export the image's instrument, anchor, and normalized open-order rows."""
         return {
             "instrument": self.instrument,
             "source_epoch": self.source_epoch,
@@ -53,6 +57,7 @@ class Image:
         cls, instrument: int, source_epoch: int, anchor: int, rows: List[Dict],
         config: Config,
     ) -> "Image":
+        """Validate one snapshot image before deriving any restore commands."""
         context = f"instrument {instrument}"
         if type(rows) is not list or len(rows) > config.slots:
             raise CheckpointError(f"{context} has invalid active slot count")
@@ -74,6 +79,7 @@ class Image:
         return cls(instrument, source_epoch, anchor, tuple(sorted(orders.items())))
 
     def commands(self, cfg: Config) -> Iterator[Command]:
+        """Yield one fenced snapshot sequence with all of the image's open orders."""
         sequence = self.anchor
         yield Command(instrument=self.instrument, op=Operation.SNAP_BEGIN, sequence=sequence)
         for key, order in self.orders:
@@ -86,6 +92,7 @@ class Image:
         yield Command(instrument=self.instrument, op=Operation.SNAP_END, sequence=sequence)
 
     def expected_sequence(self, cfg: Config) -> int:
+        """Compute the next sequence expected after the snapshot completes."""
         return (self.anchor + len(self.orders) + 2) & cfg.sequence_max
 
 
@@ -99,9 +106,11 @@ class RestorePlan:
 
     @property
     def cfg(self) -> Config:
+        """Recreate simulator configuration from the restore plan's recorded geometry."""
         return PROFILES[self.profile]
 
     def commands(self) -> Iterable[Command]:
+        """Yield restore commands in the plan's selected bank order."""
         paths = [iter(image.commands(self.cfg)) for image in self.images]
         if self.group_by_instrument:
             for stream in paths:
@@ -117,6 +126,7 @@ class RestorePlan:
             paths = remaining
 
     def rows(self) -> Iterator[FeedRow]:
+        """Place each restore command on a replay cycle to form a deterministic input tape."""
         cycle = 0
         if self.initial_reset:
             yield FeedRow(cycle, reset=True)
@@ -131,6 +141,7 @@ class RestorePlan:
             cycle += self.gap + 1
 
     def manifest(self) -> Dict:
+        """Serialize plan settings and expected restore state with a digest."""
         attrs = {
             "profile": self.profile,
             "group_by_instrument": self.group_by_instrument,
@@ -153,6 +164,7 @@ class RestorePlan:
 
     @classmethod
     def read_manifest(cls, manifest: Dict) -> "RestorePlan":
+        """Verify manifest integrity before recreating its validated checkpoint images."""
         if type(manifest) is not dict or set(manifest) != {"schema", "data", "digest", "expected"}:
             raise CheckpointError("manifest container requires schema, data, digest, expected")
         if manifest["schema"] != CHECKPOINT_SCHEMA:
@@ -193,6 +205,7 @@ class RestorePlan:
 
 
 def parse_anchors(args: Iterable[str], cfg: Config) -> Dict[int, int]:
+    """Parse bank-to-sequence arguments with ownership and width checks."""
     result = {}
     for value in args:
         pair = value.split("=", 1)
@@ -214,6 +227,7 @@ def from_inventory(
     data: Dict, profile: str, anchors: Dict[int, int],
     *, grouped: bool = False, gap: int = 0, reset: bool = True,
 ) -> RestorePlan:
+    """Build a checkpoint from selected instrument rows and requested anchors."""
     if not 0 <= gap <= 20:
         raise CheckpointError("gap must be between 0 and 20")
     cfg = PROFILES[profile]
@@ -242,6 +256,7 @@ def from_inventory(
 def assert_plan_rows(plan: RestorePlan, rows: Iterable[FeedRow]) -> Dict:
     # Compare source rows before interpreting their semantics. An omitted
     # command in a snapshot could otherwise form a valid smaller image.
+    """Check that a replay tape exactly implements the snapshot plan."""
     observed = tuple(rows)
     expected = tuple(plan.rows())
     if len(observed) != len(expected):
@@ -280,6 +295,7 @@ def assert_plan_rows(plan: RestorePlan, rows: Iterable[FeedRow]) -> Dict:
 
 
 def main() -> None:
+    """Run checkpoint creation or restore verification with the selected input paths."""
     cli = argparse.ArgumentParser(description=__doc__)
     tools = cli.add_subparsers(dest="operation", required=True)
     make = tools.add_parser("plan", help="turn an offline inventory into a canonical restore tape")

@@ -26,6 +26,7 @@ module tb_quote_reacquire;
     quote_publication_pipeline #(.BANKS(BANKS), .PRICE_W(PW), .QTY_W(QW), .EPOCH_W(EW), .REV_W(RW))
         dut (.*);
 
+    // Present two desired quote snapshots and the sink ready value.
     task automatic set_inputs(input logic [KW-1:0] lane_a, lane_b, input bit ready);
         @(negedge clk);
         desired_now = {lane_b, lane_a};
@@ -34,16 +35,19 @@ module tb_quote_reacquire;
         #1;
     endtask
 
+    // Wait for the active edge and sample the updated outputs after settling.
     task automatic sample_edge;
         @(posedge clk);
         #1;
     endtask
 
+    // Set the desired quote states and advance the testbench by one clock.
     task automatic drive(input logic [KW-1:0] lane_a, lane_b, input bit ready);
         set_inputs(lane_a, lane_b, ready);
         sample_edge();
     endtask
 
+    // Compare one published quote's lane, value, and revision with the directed expectation.
     task automatic expect_offer(
         input logic [BW-1:0] lane, input logic [KW-1:0] key,
         input logic [RW-1:0] serial, input logic applicable

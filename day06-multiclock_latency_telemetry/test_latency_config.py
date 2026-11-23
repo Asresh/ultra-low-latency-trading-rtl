@@ -9,17 +9,20 @@ from latency_config import (
 
 
 def writes(plan):
+    """Select the bus write entries from a mixed configuration plan."""
     return [operation for operation in plan if operation.operation == "write"]
 
 
 class Configuration(unittest.TestCase):
     def test_plan_has_probe_then_quiesce(self):
+        """Cover the plan has probe then quiesce regression case."""
         p = synthesize_plan({})
         self.assertEqual(p[0], Bus.poll(ID, 0xFFFFFFFF, DEVICE_SIGNATURE))
         self.assertEqual(p[2], Bus.write(COMMAND, 0, 1))
         self.assertEqual(p[3], Bus.poll(STATUS, 1, 0))
 
     def test_exact_32_32_program_order_and_snapshot_fence(self):
+        """Cover the exact 32 32 program order and snapshot fence regression case."""
         p = synthesize_plan({
             "period_ns": "6.5", "timeout_ticks": 0x123456789,
             "armed": True, "snapshot": True, "latch_clock": True,
@@ -46,6 +49,7 @@ class Configuration(unittest.TestCase):
         self.assertIn(Bus.poll(STATUS, 0x41, 1), p[command_index+1:])
 
     def test_byte_strobes_and_timeout_partition(self):
+        """Cover the byte strobes and timeout partition regression case."""
         operation = Bus.write(16, 100, 2).json()
         self.assertEqual(operation, {"op": "write", "addr": "0x010", "data": "0x00000064", "wstrb": "0x2"})
         p = synthesize_plan({"timeout_ticks": (1 << 63) - 1, "quiesce": False})
@@ -54,6 +58,7 @@ class Configuration(unittest.TestCase):
         self.assertNotIn(Bus.write(COMMAND, 0, 1), p)
 
     def test_missing_or_invalid_atoms(self):
+        """Cover the missing or invalid atoms regression case."""
         cases = (
             ({"timeout_ticks": 0}, "nonzero"),
             ({"timeout_ticks": 2 ** 63}, "unsigned"),
@@ -77,6 +82,7 @@ class Configuration(unittest.TestCase):
                     synthesize_plan(item)
 
     def test_depth_applies_to_pretrigger_retention(self):
+        """Cover the depth applies to pretrigger retention regression case."""
         p = synthesize_plan({"trace": {"post": 3}}, trace_depth=4)
         self.assertIn(Bus.write(TRACE_CONTROL, 0x10300), p)
         with self.assertRaisesRegex(ConfigError, "power"):
@@ -85,6 +91,7 @@ class Configuration(unittest.TestCase):
             synthesize_plan({"trace": {"post": 4}}, trace_depth=4)
 
     def test_bus_error_domain(self):
+        """Cover the bus error domain regression case."""
         with self.assertRaises(ConfigError):
             Bus.write(3, 0)
         with self.assertRaises(ConfigError):

@@ -37,10 +37,12 @@ class PathBudget:
 
     @property
     def key(self):
+        """Return the canonical identity used for grouping or table lookup."""
         return self.event_class, self.start_probe, self.stop_probe
 
 
 def quantile(sorted_values, percentile):
+    """Select the requested nearest-rank quantile from sorted samples."""
     if not 0 < percentile <= 1:
         raise ValueError("percentile must be a fraction in (0, 1]")
     n = len(sorted_values)
@@ -52,6 +54,7 @@ def quantile(sorted_values, percentile):
 
 
 def percentile_value(text):
+    """Parse a requested percent as an exact rational value."""
     try:
         number = Fraction(text) / 100
     except (ValueError, ZeroDivisionError) as exc:
@@ -62,6 +65,7 @@ def percentile_value(text):
 
 
 def parse_path(raw):
+    """Parse and validate the endpoints and group in a path selector."""
     try:
         a, b, c = [int(token, 10) for token in raw.split(":")]
     except ValueError as exc:
@@ -72,6 +76,7 @@ def parse_path(raw):
 
 
 def parse_budget(raw):
+    """Turn an external budget row into a validated path-specific limit."""
     fragments = raw.split(",")
     if len(fragments) != 4:
         raise argparse.ArgumentTypeError("budget needs PATH,PERCENT,LIMIT_TICKS,MIN_SAMPLES")
@@ -89,6 +94,7 @@ def parse_budget(raw):
 
 class Profile:
     def __init__(self):
+        """Initialize per-path collections for latency samples."""
         self.status_counts = Counter()
         self.by_path = defaultdict(list)
         self.timeline = defaultdict(list)
@@ -98,6 +104,7 @@ class Profile:
         self.last_tick = None
 
     def add(self, event):
+        """Add only matched endpoints to the corresponding path's latency sample set."""
         if self.first_tick is None:
             self.first_tick = event.observed_tick
         if self.last_tick is not None and modular_delta(event.observed_tick, self.last_tick) >= HALF64:
@@ -118,6 +125,7 @@ class Profile:
 
     @classmethod
     def from_capture(cls, source):
+        """Build grouped observations from decoded event records."""
         result = cls()
         for word in read_words(source, 320):
             result.add(read_event(word))
@@ -126,6 +134,7 @@ class Profile:
         return result
 
     def group_summary(self, key, quantiles):
+        """Summarize a selected latency group using the requested quantiles."""
         sorted_values = sorted(self.by_path.get(key, ()))
         if not sorted_values:
             return {"matched": 0, "min_ticks": None, "max_ticks": None, "quantiles": {}}
@@ -140,6 +149,7 @@ class Profile:
         }
 
     def windows(self, key, size):
+        """Partition a path's samples into windows for temporal comparisons."""
         if size <= 0:
             raise ValueError("window size must be positive")
         buckets = defaultdict(list)
@@ -151,6 +161,7 @@ class Profile:
         ]
 
     def meets(self, budget):
+        """Check whether this path's measured quantile meets the configured budget."""
         sorted_values = sorted(self.by_path.get(budget.key, ()))
         result = quantile(sorted_values, budget.percentile)
         enough = len(sorted_values) >= budget.minimum_samples
@@ -172,6 +183,7 @@ class Profile:
 
 
 def empirical_gap(sample_a, sample_b):
+    """Find the greatest separation between two empirical cumulative distributions."""
     if not sample_a or not sample_b:
         return None
     a = Counter(sample_a)
@@ -191,6 +203,7 @@ def empirical_gap(sample_a, sample_b):
 
 
 def profile_report(profile, quantiles, group_filter, reference=None, window=None, budgets=()):
+    """Combine measured groups, window changes and budget checks into a report."""
     keys = set(profile.by_path)
     if reference is not None:
         keys.update(reference.by_path)
@@ -223,11 +236,13 @@ def profile_report(profile, quantiles, group_filter, reference=None, window=None
 
 
 def open_profile(path):
+    """Open the specified capture and build a summary across paths."""
     with path.open(encoding="ascii") as source:
         return Profile.from_capture(source)
 
 
 def main():
+    """Compare capture latency populations using requested quantiles and budgets."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path)
     parser.add_argument("--baseline", type=Path)

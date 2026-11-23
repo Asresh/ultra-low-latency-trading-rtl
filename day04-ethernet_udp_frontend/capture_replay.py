@@ -21,6 +21,7 @@ REPLAY_FILES = (
 
 
 def stable_rules():
+    """Build the deterministic policy used by the synthetic replay fixture."""
     return (
         Rule(dst_port=Match(1000,65535),drop=True),
         Rule(dst_ip=Match(DST,0xffffff00),dst_port=Match(18000,65535),queue=7),
@@ -29,6 +30,7 @@ def stable_rules():
 
 
 def synthetic_input(seed):
+    """Create reproducible capture inputs with valid traffic and intended error cases."""
     rng = random.Random(seed)
     data = section("<")+interface("<",name="A",scale=9,fcs=32)
     data += interface("<",name="B",scale=9,fcs=32)
@@ -63,6 +65,7 @@ def synthetic_input(seed):
 
 def bundle(capture, directory, rules, *, clock=156250000, fcs="metadata",
            selected_interface=None, idle=0, strict=False):
+    """Export capture beats, matching rules, and modeled receive outputs for RTL replay."""
     directory = Path(directory)
     directory.mkdir(exist_ok=True,parents=True)
     rules = tuple(rules)
@@ -101,6 +104,7 @@ def bundle(capture, directory, rules, *, clock=156250000, fcs="metadata",
 
 
 def main():
+    """Parse replay inputs and write one simulator-ready capture bundle."""
     ap = argparse.ArgumentParser(description=__doc__)
     inputs = ap.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--capture", type=Path)

@@ -12,16 +12,19 @@ from net_scenarios import DST, SRC, standard
 
 
 def patch_word(data, pos, value):
+    """Replace a 16-bit packet field without altering the rest of the frame."""
     return data[:pos] + struct.pack(">H",value) + data[pos+2:]
 
 
 class IntegrityTests(unittest.TestCase):
     def test_rfc1071_example(self):
+        """Check that RFC 1071 example."""
         octets = bytes.fromhex("0001f203f4f5f6f7")
         self.assertEqual(checksum(octets),0x220d)
         self.assertEqual(checksum(octets+bytes.fromhex("220d")),0)
 
     def test_known_vlan_wire_frame(self):
+        """Check that known VLAN wire frame."""
         frame = bytes.fromhex(
             "0000000000010000000000028100007b08004500002100004000401140c9"
             "0a000001ef010101007b01c8000dbfbb68656c6c6f000000000000000000"
@@ -34,6 +37,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(decoded.packet.serialize(),frame)
 
     def test_udp_pseudo_header_detects_source_rewrite(self):
+        """Check that UDP pseudo header detects source rewrite."""
         p = standard(b"odd UDP payload")
         source_rewritten = replace(p,src_ip=int(IPv4Address("10.0.0.2")))
         original_udp = p.segment()
@@ -41,6 +45,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(parse_frame(rewritten).result,Result.UDP_CHECKSUM)
 
     def test_ieee_padding_excluded_from_udp_checksum(self):
+        """Check that ieee padding excluded from UDP checksum."""
         packet = standard(b"x")
         raw = packet.serialize(include_pad=False)
         for fill in (0,0x22,255):
@@ -50,6 +55,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(parse_frame(padded+b"\x00").result,Result.IP_LENGTH)
 
     def test_checksum_option_applies_only_to_ipv4_zero_field(self):
+        """Check that checksum option applies only to IPv4 zero field."""
         p = standard(b"odd",udp_zero=True)
         raw = p.serialize()
         self.assertEqual(parse_frame(raw).result,Result.OK)
@@ -59,6 +65,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(parse_frame(tampered).result,Result.UDP_CHECKSUM)
 
     def test_computed_zero_udp_checksum_transmitted_as_all_ones(self):
+        """Check that computed zero UDP checksum transmitted as all ones."""
         p = standard(b"\x00\x00")
         segment = UDP_HEAD.pack(p.src_port,p.dst_port,10,0)+p.payload
         fix = udp_checksum(p.src_ip,p.dst_ip,segment)
@@ -67,6 +74,7 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(parse_frame(fixed.serialize(),allow_zero=False).result,Result.OK)
 
     def test_checksums_options_lengths_and_byte_alignments(self):
+        """Check that checksums options lengths and byte alignments."""
         r = random.Random(47)
         for option_len in range(0,41,4):
             for vlan_count in range(3):
@@ -84,6 +92,7 @@ class IntegrityTests(unittest.TestCase):
                             self.assertEqual(parse_frame(bytes(broken)).result,Result.UDP_CHECKSUM)
 
     def test_length_and_fragment_errors_have_explicit_codes(self):
+        """Check that length and fragment errors have explicit codes."""
         p = standard(b"z"*34)
         wire = p.serialize()
         variants = [
@@ -104,6 +113,7 @@ class IntegrityTests(unittest.TestCase):
 
 class BoundariesTests(unittest.TestCase):
     def test_exact_packet_bound_and_following_excess(self):
+        """Check that exact packet bound and following excess."""
         tags=((0x88a8,2),(0x8100,3))
         p=standard(bytes(1446),tags=tags,options=b"\x01"*40)
         frame=p.serialize()
@@ -113,6 +123,7 @@ class BoundariesTests(unittest.TestCase):
         self.assertEqual(parse_frame(frame+b"z").result,Result.FRAME_LIMIT)
 
     def test_transport_size_does_not_include_intentional_ethernet_gap(self):
+        """Check that transport size does not include intentional ethernet gap."""
         p=standard(b"once")
         frame=p.serialize(include_pad=False)
         for padding_len in range(60-len(frame)+1):
@@ -122,6 +133,7 @@ class BoundariesTests(unittest.TestCase):
         self.assertEqual(parse_frame(abnormal).result,Result.IP_LENGTH)
 
     def test_final_lane_fragments_are_orthogonal_to_rfc_udp_length(self):
+        """Check that final lane fragments are orthogonal to rfc UDP length."""
         for depth in range(3):
             tags=tuple((0x8100,i) for i in range(depth))
             for valid_bytes in range(1,9):
@@ -137,6 +149,7 @@ class BoundariesTests(unittest.TestCase):
 
 class FramingAndClassifierTests(unittest.TestCase):
     def test_every_final_keep_is_low_prefix(self):
+        """Check that every final keep is low prefix."""
         for length in range(1,145):
             payload = bytes((i*19)&255 for i in range(length))
             rng = random.Random(length)
@@ -147,6 +160,7 @@ class FramingAndClassifierTests(unittest.TestCase):
             self.assertTrue(beats[-1].last)
 
     def test_frame_bad_priority_even_when_mac_bad(self):
+        """Check that frame bad priority even when mac bad."""
         data = to_beats(b"longer than eight octets",bad=True)
         samples = [
             (0,{"first":False}),
@@ -162,6 +176,7 @@ class FramingAndClassifierTests(unittest.TestCase):
         self.assertEqual(from_beats(data)[1],Result.MAC_BAD)
 
     def test_record_parser_rejects_out_of_range_lanes(self):
+        """Check that record parser rejects out of range lanes."""
         reference = MacBeat(0x00335577,7,True,True)
         self.assertEqual(MacBeat.parse(reference.row()),reference)
         malformed = ("123 1 2 1 0","0 ff 1 0","10000000000000001 1 1 0 0","0 1ff 1 0 0")
@@ -170,6 +185,7 @@ class FramingAndClassifierTests(unittest.TestCase):
                 MacBeat.parse(row)
 
     def test_msb_priority_uses_policy_order(self):
+        """Check that MSB priority uses policy order."""
         tagged = standard(b"x",tags=((0x8100,0xc00a),))
         parsed = parse_frame(tagged.serialize())
         broad = Rule(dst_ip=Match(DST,0xffffff00),queue=2)
@@ -182,6 +198,7 @@ class FramingAndClassifierTests(unittest.TestCase):
         self.assertEqual(classify(parsed,[first],7).queue,5)
 
     def test_metadata_fields_and_timestamp_mask(self):
+        """Check that metadata fields and timestamp mask."""
         p = standard(b"abcdef",tags=((0x88a8,5),(0x8100,7)),ident=0x3344,ttl=3)
         parsed = classify(parse_frame(p.serialize()),[Rule(queue=6)],42)
         data,mask = parsed.rx_info()
@@ -195,6 +212,7 @@ class FramingAndClassifierTests(unittest.TestCase):
         self.assertEqual(known_mask>>376,255)
 
     def test_numeric_inputs_are_bounded(self):
+        """Check that numeric inputs are bounded."""
         self.assertEqual(as_mac("01:00:5e:01:02:03"),0x1005e010203)
         for value in ("1:00:5e:01:02:03","zz:00:00:00:00:00",1<<48,[]):
             with self.subTest(value=value),self.assertRaises(ValueError):
@@ -205,6 +223,7 @@ class FramingAndClassifierTests(unittest.TestCase):
 
 class TxContractTests(unittest.TestCase):
     def test_descriptor_packing_respects_network_and_host_field_widths(self):
+        """Check that descriptor packing respects network and host field widths."""
         p = standard(b"abc",ident=0xabcd,ttl=2,tos=0xb8,udp_zero=True,df=True)
         word = TxDescriptor(p,0x00112233).encode()
         self.assertEqual(word>>288,0x00112233)
@@ -213,6 +232,7 @@ class TxContractTests(unittest.TestCase):
         self.assertEqual(word & 0xffffffff,0x02b80030)
 
     def test_descriptor_reject_preserves_failure_precedence(self):
+        """Check that descriptor reject preserves failure precedence."""
         p = standard(b"ninebytes")
         beats = to_beats(p.payload)
         beats[0] = replace(beats[0],keep=0)
@@ -224,6 +244,7 @@ class TxContractTests(unittest.TestCase):
         self.assertEqual(sized.expected(good_beats)[0],Result.TX_LENGTH)
 
     def test_host_tx_model_strips_options_and_builds_two_tag_header(self):
+        """Check that host tx model strips options and builds two tag header."""
         p = standard(b"body",tags=((0x8100,3),(0x8100,8)),options=b"\x01"*12,protocol=6)
         status,wire = TxDescriptor(p,5).expected(to_beats(p.payload))
         self.assertEqual(status,Result.OK)

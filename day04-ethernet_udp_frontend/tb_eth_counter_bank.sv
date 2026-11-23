@@ -18,6 +18,7 @@ module tb_eth_counter_bank;
     integer snaps = 0, saturated = 0, cycles = 0;
     logic [31:0] random_state = 32'h7389aebf;
 
+    // Step the fixed-seed pseudo-random generator used for repeatable test patterns.
     function automatic logic [31:0] random_next(input logic [31:0] value);
         logic [31:0] x;
         begin
@@ -53,6 +54,7 @@ module tb_eth_counter_bank;
         end
     end
 
+    // Read every captured Ethernet counter and compare it with the reference counters.
     task automatic read_all;
         begin
             for (integer i=0; i<COUNTERS; i=i+1) begin

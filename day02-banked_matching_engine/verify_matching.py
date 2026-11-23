@@ -30,6 +30,7 @@ class Sample:
     event_used: Tuple[int, ...]
 
     @classmethod
+    # Decode one trace row and unpack its masks, occupancies, command, and event using profile widths.
     def parse(cls, line: str, profile: Profile) -> "Sample":
         try:
             words = tuple(map(int, line.split()))
@@ -62,24 +63,29 @@ class Sample:
         )
 
     @property
+    # Indicate that this sampled edge transferred an input command.
     def source_fire(self) -> bool:
         return self.source_valid and self.source_ready
 
     @property
+    # Indicate that this sampled edge transferred an output event.
     def sink_fire(self) -> bool:
         return self.sink_valid and self.sink_ready
 
 
+# Extract one lane's bit from a packed mask.
 def bit_at(mask: int, index: int) -> int:
     return (mask >> index) & 1
 
 
+# Read trace rows in order and convert them to typed cycle samples.
 def sample_trace(path: Path, profile: Profile) -> Iterable[Sample]:
     with path.open(encoding="utf-8") as stream:
         for line in stream:
             yield Sample.parse(line, profile)
 
 
+# Describe precisely which fields differ between hardware and reference events.
 def differing_event_fields(got: Event, expected: Event) -> str:
     return ", ".join(
         f"{f.name}={getattr(got, f.name)} (expected {getattr(expected, f.name)})"
@@ -88,6 +94,7 @@ def differing_event_fields(got: Event, expected: Event) -> str:
     )
 
 
+# Summarize a latency sample with count and percentile measurements.
 def describe_samples(values: List[int]) -> Dict[str, int]:
     if not values:
         return {}
@@ -103,6 +110,7 @@ def describe_samples(values: List[int]) -> Dict[str, int]:
 
 
 class TraceChecker:
+    # Initialize the reference model, expected lane queues, and independent coverage counters.
     def __init__(self, profile: Profile, scenario: Scenario):
         self.profile = profile
         self.scenario = scenario
@@ -137,11 +145,13 @@ class TraceChecker:
         self.in_reset = False
         self.cycle = -1
 
+    # Raise a diagnostic tied to the scenario and cycle, formatting expensive details only on failure.
     def require(self, condition: bool, failure) -> None:
         if not condition:
             message = failure() if callable(failure) else failure
             raise AssertionError(f"{self.scenario.name} cycle {self.cycle}: {message}")
 
+    # Check the reset interface and clear all reference state and in-flight tracking.
     def on_reset(self, sample: Sample) -> None:
         self.require(not sample.source_ready and not sample.sink_valid,
                      "interface allowed transfers during reset")
@@ -168,6 +178,7 @@ class TraceChecker:
         self.prev_event_seq = [None] * self.lanes
         self.prev_cmd_seq = [None] * self.lanes
 
+    # Check readiness from configured FIFO capacity and require stable stalled payloads.
     def check_flow_control(self, sample: Sample, source_lane: int) -> None:
         self.require(sample.command_used == tuple(self.expected_commands),
                      lambda: f"command FIFO levels {sample.command_used} != {self.expected_commands}")
@@ -196,6 +207,7 @@ class TraceChecker:
         if sample.sink_valid and not sample.sink_ready:
             self.counters["sink_stalls"] += 1
 
+    # Recompute the round-robin grant, lock selection under stalls, and bound lane wait.
     def check_arbiter(self, sample: Sample) -> Optional[int]:
         selected = self.held_lane
         if selected is None:
@@ -225,6 +237,7 @@ class TraceChecker:
                              lambda: f"continuously eligible lane {lane} exceeded fairness bound")
         return selected
 
+    # Confirm the accepted stimulus and queue reference events for the target lane.
     def handle_input(self, sample: Sample, lane: int) -> None:
         source_index = len(self.accept_cycles)
         self.require(source_index < len(self.scenario.beats), "RTL accepted an extra command")
@@ -246,6 +259,7 @@ class TraceChecker:
         else:
             self.counters["invalid_instruments"] += 1
 
+    # Compare the head event and record delivery latency and sequence-wrap metrics on transfer.
     def handle_output(self, sample: Sample, lane: int) -> None:
         queue = self.pending[lane]
         self.require(bool(queue), lambda: f"lane {lane} emitted unexpected {sample.event}")
@@ -278,6 +292,7 @@ class TraceChecker:
         self.prev_event_seq[lane] = actual.event_sequence
         self.prev_cmd_seq[lane] = actual.command_sequence
 
+    # Calculate the next ingress and egress FIFO occupancy from observed lane handshakes.
     def update_occupancy(self, sample: Sample, source_lane: int) -> None:
         for lane, occupied in enumerate(sample.command_used):
             self.command_watermark[lane] = max(self.command_watermark[lane], occupied)
@@ -298,6 +313,7 @@ class TraceChecker:
                          lambda: f"lane {lane} committed into a full event queue")
             self.expected_events[lane] = new
 
+    # Replay one sampled edge in protocol order, comparing output before applying new input.
     def verify_cycle(self, sample: Sample) -> None:
         self.require(sample.cycle == self.cycle + 1, "missing or repeated trace lines")
         self.cycle = sample.cycle
@@ -322,6 +338,7 @@ class TraceChecker:
             self.counters["other_bank_progress_during_stall"] += int(bool(other))
         self.update_occupancy(sample, source_lane)
 
+    # Require any expected traffic to drain, check scenario coverage, and summarize counters and latency.
     def finish(self) -> Dict:
         self.require(len(self.accept_cycles) == len(self.scenario.beats),
                      "simulation ended before all source commands were accepted")
@@ -371,6 +388,7 @@ class TraceChecker:
         }
 
 
+# Write one scenario, run the simulator, then replay its measured trace through the scoreboard.
 def verify_scenario(
     scenario: Scenario, profile: Profile, simulator: Path, vvp: str, build: Path,
 ) -> Dict:
@@ -394,6 +412,7 @@ def verify_scenario(
     return checker.finish()
 
 
+# Format ordered scenario measurements as a concise Markdown report.
 def metrics_table(report: Dict) -> str:
     lines = [
         f"# Matching engine measurements for {report['profile']}",
@@ -426,6 +445,7 @@ def metrics_table(report: Dict) -> str:
     return "\n".join(lines)
 
 
+# Run all requested scenarios for a profile and save structured and human-readable results.
 def run_report(args: argparse.Namespace) -> None:
     if not 0 <= args.commands <= 25000:
         raise SystemExit("--commands must be between 0 and 25000")
@@ -448,6 +468,7 @@ def run_report(args: argparse.Namespace) -> None:
     print(metrics_table(report))
 
 
+# Define the CLI for profile parameters and for test execution and reporting.
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="operation", required=True)
@@ -463,6 +484,7 @@ def arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# Dispatch the requested verification mode.
 def main() -> None:
     args = arguments()
     if args.operation == "run":

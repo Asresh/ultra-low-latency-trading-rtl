@@ -18,6 +18,7 @@ from rule_control import (
 
 class Registers:
     def __init__(self):
+        """Initialize the fake bus state used to observe ordering and injected failures."""
         self.epoch = 0
         self.active = 0
         self.bank = [[0]*8 for _ in range(2)]
@@ -34,6 +35,7 @@ class Registers:
         self.wrong_words = False
 
     def transact(self, command):
+        """Record one fake register access and return the selected hardware response."""
         address = command.address
         if not command.write:
             reads = {
@@ -77,6 +79,7 @@ class Registers:
 
 class PolicyParsingTests(unittest.TestCase):
     def test_parse_all_match_kinds_and_steer(self):
+        """Check that parse all match kinds and steer."""
         document = {
             "rules":[
                 {"dst_ip":"239.1.2.99/24","src_ip":"10.15.4.0/24",
@@ -97,6 +100,7 @@ class PolicyParsingTests(unittest.TestCase):
         self.assertEqual((outcome.result,outcome.queue,outcome.epoch),(Result.OK,7,2))
 
     def test_invalid_schema_is_rejected(self):
+        """Check that invalid schema is rejected."""
         cases = (
             {}, {"rules":"ring"}, {"rules":[{}]*9}, {"rules":[42]},
             {"rules":[{"action":"mirror"}]}, {"rules":[{"enabled":"yes"}]},
@@ -111,6 +115,7 @@ class PolicyParsingTests(unittest.TestCase):
                 parse_policy(value)
 
     def test_load_file_constraint_and_plan_json(self):
+        """Check that load file constraint and plan json."""
         with tempfile.TemporaryDirectory() as directory:
             cfg = Path(directory)/"policy.json"
             cfg.write_text(json.dumps({"rules":[{"action":"pass","queue":3}]}))
@@ -125,6 +130,7 @@ class PolicyParsingTests(unittest.TestCase):
             self.assertEqual(sum(op["address"]=="0x40" for op in plan),8)
 
     def test_invalid_transaction_word_alignment_and_numeric_width(self):
+        """Check that invalid transaction word alignment and numeric width."""
         for args in ((True,-4,0,15),(True,0x60,0,16),(False,0x21,0,0),(True,4,1<<32,15)):
             with self.subTest(args=args),self.assertRaises(ValueError):
                 Access(*args)
@@ -134,6 +140,7 @@ class PolicyParsingTests(unittest.TestCase):
             list(snapshot_plan([32]))
 
     def test_explicit_plan_contains_prior_epoch_and_single_commit(self):
+        """Check that explicit plan contains prior epoch and single commit."""
         sequence = list(policy_plan([Rule(queue=6)],expected_epoch=4))
         self.assertEqual(sequence[:3],[
             access_read(CSR_ID,IDENTITY),access_read(CSR_VERSION,1<<16),access_read(CSR_EPOCH,4),
@@ -147,6 +154,7 @@ class PolicyParsingTests(unittest.TestCase):
 
 class ControlExecutionTests(unittest.TestCase):
     def test_replace_defines_all_rows_before_swap(self):
+        """Check that replace defines all rows before swap."""
         device = Registers()
         master = Control(device.transact)
         expected = (Rule(queue=3),Rule(tags=Match(2,3),drop=True))
@@ -159,6 +167,7 @@ class ControlExecutionTests(unittest.TestCase):
         self.assertEqual(device.commits,2)
 
     def test_readback_error_never_triggers_commit(self):
+        """Check that readback error never triggers commit."""
         device = Registers()
         device.wrong_words = True
         with self.assertRaisesRegex(ControlError,"expected"):
@@ -166,6 +175,7 @@ class ControlExecutionTests(unittest.TestCase):
         self.assertEqual((device.active,device.commits),(0,0))
 
     def test_command_status_never_partially_applies_active_rule(self):
+        """Check that command status never partially applies active rule."""
         device = Registers()
         device.fail_after = 28
         with self.assertRaisesRegex(ControlError,"status"):
@@ -174,6 +184,7 @@ class ControlExecutionTests(unittest.TestCase):
         self.assertEqual((device.active,device.commits),(0,0))
 
     def test_counter_combine_clear_and_later_snapshot(self):
+        """Check that counter combine clear and later snapshot."""
         device = Registers()
         device.live[2] = 0xabcd0123456789
         device.live[31] = (1<<64)-1
@@ -186,11 +197,13 @@ class ControlExecutionTests(unittest.TestCase):
         self.assertEqual((second,empty),(2,{31:0}))
 
     def test_changed_snapshot_id_prevents_incoherent_read_and_clear(self):
+        """Check that changed snapshot id prevents incoherent read and clear."""
         device = Registers()
         device.live[2] = 7
         seen = 0
 
         def race(request):
+            """Change the fake snapshot epoch between reads to mimic a concurrent snapshot."""
             nonlocal seen
             if request.address == CSR_STAT_ID:
                 seen += 1

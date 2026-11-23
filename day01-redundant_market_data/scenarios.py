@@ -18,12 +18,14 @@ LIMITS = Limits(256, 64, 16)
 
 
 class Suite:
+    # Start an isolated scenario with a seeded RNG and separate stream, program, and event tapes.
     def __init__(self, seed):
         self.rng = random.Random(seed)
         self.instructions = []
         self.lanes = [[], []]
         self.events = []
 
+    # Encode one testbench command with its five fixed-width operand slots.
     def command(self, opcode, *arguments):
         arguments = arguments + (0,) * (5 - len(arguments))
         assert len(arguments) == 5
@@ -31,9 +33,11 @@ class Suite:
             f"{opcode:d} " + " ".join(f"{number:040x}" for number in arguments)
         )
 
+    # Queue a session configuration with a 64-bit initial receive sequence.
     def config(self, sequence, session=SESSION):
         self.command(CONFIG, int.from_bytes(session, "big"), sequence & MASK64)
 
+    # Packetize both input lanes and queue them together under a selected source timing profile.
     def burst(self, lane_a=(), lane_b=(), source_profile=0):
         self.burst_words(
             [beat for packet in lane_a for beat in words(packet, self.rng)],
@@ -41,58 +45,74 @@ class Suite:
             source_profile,
         )
 
+    # Append raw beats to each lane and record how many the bench should consume.
     def burst_words(self, lane_a, lane_b, source_profile=0):
         self.lanes[0].extend(lane_a)
         self.lanes[1].extend(lane_b)
         self.command(BURST, len(lane_a), len(lane_b), source_profile)
 
+    # Inject one malformed bus field into a selected packet beat and schedule it on one lane.
     def fault(self, packet, beat, field, replacement, *, lane=0):
         beats = [list(item) for item in words(packet, self.rng)]
         beats[beat][field] = replacement
         self.burst_words(beats if lane == 0 else (), beats if lane == 1 else ())
 
+    # Advance the bench by a fixed number of idle cycles.
     def idle(self, cycles):
         self.command(WAIT, cycles)
 
+    # Check the receive cursor, watermark, flags, and reorder occupancy.
     def status(self, expected, high_water, gap=0, end=0, occupancy=0):
         self.command(STATUS, expected & MASK64, high_water & MASK64, gap, end, occupancy)
 
+    # Expect a recovery request for a message interval and optionally hold it stalled.
     def request(self, first, count, hold=0):
         self.command(REQUEST, make_request(SESSION, first, count), hold)
 
+    # Set the testbench's output ready policy for subsequent cycles.
     def flow(self, mode):
         self.command(FLOW, mode)
 
+    # Compare a selected statistics counter with its expected value.
     def stat(self, index, value):
         self.command(STAT, index, value)
 
+    # Check a statistics counter without requiring the normal output to drain.
     def peek(self, index, value):
         self.command(STAT_PEEK, index, value)
 
+    # Require reorder occupancy to have reached the stated high-water mark.
     def peak_at_least(self, occupancy):
         self.command(OCCUPANCY_PEAK, occupancy)
 
+    # Check that the DUT has emitted exactly the events written to the golden tape so far.
     def count(self):
         self.command(EVENTS, len(self.events))
 
+    # Assert that no recovery request is pending at this checkpoint.
     def no_request(self):
         self.command(NO_REQUEST)
 
+    # Check ingress concurrency and exact edge-to-edge latency for the current run.
     def benchmark(self, terminal_span, end_to_event, input_span, simultaneous):
         self.command(BENCHMARK, terminal_span, end_to_event, input_span, simultaneous)
 
+    # Create reproducible sample messages for the requested ITCH type codes.
     def payloads(self, kinds):
         return [make_itch(kind, self.rng) for kind in kinds]
 
+    # Build one well-formed datagram and validate it against the configured test geometry.
     def data(self, first, payloads, session=SESSION):
         blob = make_packet(session, first, payloads)
         decode_packet(blob, *LIMITS)
         return blob
 
+    # Append decoded events in sequence order to the independent golden tape.
     def record(self, first, payloads):
         for offset, payload in enumerate(payloads):
             self.events.append(decode_itch((first + offset) & MASK64, payload).bits())
 
+    # Write the stimulus program, both lane tapes, and the golden output file for the bench.
     def write(self, folder):
         folder.mkdir(exist_ok=True, parents=True)
         (folder/"program.txt").write_text("\n".join(self.instructions) + "\n")
@@ -104,6 +124,7 @@ class Suite:
         (folder/"golden.txt").write_text("\n".join(f"{data:0147x}" for data in self.events)+"\n")
 
 
+# Measure simultaneous lane ingress and single-message decode latency without sink stalls.
 def latency_case(suite):
     suite.config(50)
     suite.flow(1)
@@ -125,6 +146,7 @@ def latency_case(suite):
     suite.stat(11, 2)
 
 
+# Create a short hole, then check delayed request and recovery when the missing data arrives.
 def delayed_gap_case(suite):
     suite.config(100)
     suite.flow(0)
@@ -155,6 +177,7 @@ def delayed_gap_case(suite):
     suite.stat(11, 5)
 
 
+# Block downstream progress while both capture paths keep accepting data when possible.
 def capture_stall_case(suite):
     baseline = 200
     suite.config(baseline)
@@ -178,6 +201,7 @@ def capture_stall_case(suite):
     suite.stat(11, 8)
 
 
+# Exercise sequence wrap while keeping duplicate suppression and delivery order intact.
 def wrap_case(suite):
     baseline = MASK64 - 2
     suite.config(baseline)
@@ -199,6 +223,7 @@ def wrap_case(suite):
     suite.stat(3, 1)
 
 
+# Verify framing and block-length errors are rejected before any output becomes visible.
 def bad_datagram_case(suite):
     seq = 300
     suite.config(seq)
@@ -243,6 +268,7 @@ def bad_datagram_case(suite):
     suite.stat(13, 2)
 
 
+# Check partial replay, repeated requests, and end-of-session handling across a gap.
 def recovery_case(suite):
     seq = 500
     suite.config(seq)
@@ -282,6 +308,7 @@ def recovery_case(suite):
     suite.status(81, 81)
 
 
+# Check the last unambiguous forward sequence and its exclusive recovery watermark.
 def recovery_horizon_case(suite):
     seq = MASK64-5
     half = 1 << 63
@@ -311,6 +338,7 @@ def recovery_horizon_case(suite):
     suite.stat(4, 1)
 
 
+# Generate reproducible duplicate and out-of-order bursts, then compare the merged output.
 def randomized_case(suite):
     next_seq = 1000
     suite.config(next_seq)
@@ -338,6 +366,7 @@ def randomized_case(suite):
     suite.stat(11, 600)
 
 
+# Cover maximum packet and block dimensions using the normal receiver parameters.
 def default_geometry_case(suite):
     baseline = 4000
     suite.config(baseline)
@@ -392,6 +421,7 @@ def default_geometry_case(suite):
     suite.stat(11, 17)
 
 
+# Parse the generator's profile and seed, build its scenarios, and persist the bench inputs.
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)

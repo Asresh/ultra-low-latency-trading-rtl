@@ -1,0 +1,13 @@
+{
+  "input_width": 4,
+  "output_width": 8,
+  "capacity": 128,
+  "output_stalls": [[4, 11]],
+  "report_stalls": [[3, 6]],
+  "packets": [
+    {"tag": 65, "payload": "11 22 33 44 55", "at": 0, "pad": 255},
+    {"tag": 66, "payload": "01 23 45 67 89", "at": 2, "edits": [{"beat": 1, "keep": 0}]},
+    {"tag": 65, "payload": "aa bb cc dd ee ff 00 11 22", "at": 4, "interbeat": 1},
+    {"tag": 67, "payload": "be", "at": 9}
+  ]
+}

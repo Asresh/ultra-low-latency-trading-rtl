@@ -42,6 +42,7 @@ module latency_histogram #(
     logic [63:0] cut_tick;
     logic [31:0] frame_number;
 
+    // Find the logarithmic bucket corresponding to a raw-tick duration.
     function automatic logic [BIN_W-1:0] latency_bin(input logic [63:0] delay);
         integer index;
         begin

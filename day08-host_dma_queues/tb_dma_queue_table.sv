@@ -46,21 +46,25 @@ module tb_dma_queue_table;
     integer pressure = 0, cursor_wraps = 0, irq_seen = 0, config_concurrency = 0;
     integer admitted_same_cycle = 0;
 
+    // Calculate modulo-2^32 cursor distance so wrap does not change occupancy.
     function automatic [31:0] distance(input logic [31:0] tail, head);
         distance = tail - head;
     endfunction
 
+    // Check both the submission count and available completion credit.
     function automatic logic is_eligible(input integer q);
         is_eligible = q_enabled[q] && submission_head[q] != submission_tail[q] &&
                       distance(completion_tail[q], completion_head[q]) < DEPTH;
     endfunction
 
+    // Test interval separation using half-open range endpoints.
     function automatic logic disjoint(
         input logic [64:0] first_low, first_high, second_low, second_high
     );
         disjoint = first_high <= second_low || second_high <= first_low;
     endfunction
 
+    // Validate base alignment, address bounds and nonoverlapping rings.
     function automatic logic valid_layout;
         logic [64:0] sq_start, sq_limit, cq_start, cq_limit, data_low, data_high;
         begin
@@ -79,6 +83,7 @@ module tb_dma_queue_table;
         end
     endfunction
 
+    // Compare the public queue-table outputs with the reference arrays.
     task automatic check_ports;
         logic [63:0] expected_sq, expected_cq;
         integer q;
@@ -112,6 +117,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Capture the current handshake, update the oracle and check post-edge outputs.
     task automatic step;
         logic will_cfg, will_host, accepted_c, accepted_h;
         logic completion, notify;
@@ -208,6 +214,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Deassert request and interrupt inputs before the next directed step.
     task automatic idle_inputs;
         begin
             cfg_valid = 0;
@@ -219,6 +226,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Present a queue-table configuration request with its acknowledgment expectation.
     task automatic drive_config(
         input integer q,
         input logic enable,
@@ -239,6 +247,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Present host cursor updates for one queue with expected validity.
     task automatic drive_host(
         input integer q,
         input logic [31:0] tail, head
@@ -252,6 +261,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Run fixed full, empty, wrap, overlap and acknowledgment cases.
     task automatic direct;
         begin
             @(negedge clk);
@@ -297,6 +307,7 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Advance the deterministic pseudo-random sequence used as fixture data.
     function automatic [31:0] scramble(input logic [31:0] value);
         logic [31:0] x;
         begin

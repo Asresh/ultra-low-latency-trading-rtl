@@ -44,6 +44,7 @@ RULE_BITS = 256
 
 
 def as_mac(value):
+    """Normalize a MAC address to its six-byte numeric representation."""
     if isinstance(value, str):
         octets = value.split(":")
         if len(octets) != 6 or any(len(octet) != 2 for octet in octets):
@@ -55,16 +56,19 @@ def as_mac(value):
 
 
 def as_ipv4(value):
+    """Normalize the IPv4 address to the integer carried on the wire."""
     return int(IPv4Address(value))
 
 
 def bounded(value, width, label):
+    """Reject a field that does not fit its unsigned protocol width."""
     if not isinstance(value, int) or not 0 <= value < (1 << width):
         raise ValueError(f"{label} must fit in {width} bits")
     return value
 
 
 def bit_fields(*fields):
+    """Pack ordered integer fields using their explicit bit widths."""
     value = 0
     for number, width in fields:
         value = (value << width) | bounded(number, width, "packed field")
@@ -82,6 +86,7 @@ def checksum(data):
 
 
 def udp_checksum(source, destination, segment):
+    """Compute the checksum across UDP bytes and the IPv4 pseudo-header."""
     pseudo = UDP_PSEUDO.pack(source, destination, 0, PROTOCOL_UDP, len(segment))
     return checksum(pseudo + segment)
 
@@ -95,16 +100,19 @@ class MacBeat:
     bad: bool = False
 
     def valid_bytes(self):
+        """Extract only the lanes enabled by this beat's keep mask."""
         masks = tuple((1 << count) - 1 for count in range(1, 9))
         if self.keep not in masks:
             return b""
         return self.data.to_bytes(8, "little")[:bin(self.keep).count("1")]
 
     def row(self):
+        """Serialize one MAC beat for a simulator data file."""
         return f"{self.data:016x} {self.keep:02x} {int(self.first)} {int(self.last)} {int(self.bad)}"
 
     @classmethod
     def parse(cls, row):
+        """Parse one MAC beat and validate that every supplied field fits."""
         data, keep, first, last, bad = row.split()
         flags = tuple(int(x) for x in (first, last, bad))
         if any(flag not in (0, 1) for flag in flags):
@@ -114,6 +122,7 @@ class MacBeat:
 
 
 def to_beats(payload, *, rng=None, bad=False):
+    """Split a wire image into bus-width beats with first, last, and keep fields."""
     if not payload:
         raise ValueError("zero-byte frame has no MAC representation")
     beats = []
@@ -127,6 +136,7 @@ def to_beats(payload, *, rng=None, bad=False):
 
 
 def from_beats(beats):
+    """Reassemble validated MAC beats into the corresponding frame bytes."""
     chunks = []
     fault = False
     bad = False
@@ -166,11 +176,13 @@ class Packet:
     frag_bits: int = 0
 
     def l2(self):
+        """Construct the Ethernet header, including optional VLAN tags and inner EtherType."""
         addresses = self.dest_mac.to_bytes(6, "big") + self.src_mac.to_bytes(6, "big")
         return addresses + b"".join(struct.pack(">HH", tag_type, tci)
                                     for tag_type, tci in self.tags) + BE16.pack(ETH_IP)
 
     def segment(self):
+        """Build the UDP header and payload with the selected checksum mode."""
         length = len(self.payload)+UDP_HEAD.size
         segment = UDP_HEAD.pack(self.src_port, self.dst_port, length, 0) + self.payload
         if self.udp_zero:
@@ -179,6 +191,7 @@ class Packet:
         return segment[:6] + BE16.pack(value) + segment[8:]
 
     def ip_header(self, data_len):
+        """Construct the IPv4 header, options, total length, and header checksum."""
         if len(self.options) % 4 or len(self.options) > 40:
             raise ValueError("IPv4 options must occupy four to forty aligned bytes, or be empty")
         header_size = IPV4_BASE.size + len(self.options)
@@ -190,6 +203,7 @@ class Packet:
         return blank[:10] + BE16.pack(checksum(blank)) + blank[12:]
 
     def serialize(self, *, include_pad=True, fill=0):
+        """Combine link and network headers with the UDP segment and optional padding."""
         segment = self.segment()
         frame = self.l2() + self.ip_header(len(segment)) + segment
         if include_pad and len(frame) < ETH_MIN_NO_FCS:
@@ -207,6 +221,7 @@ class Decoded:
     epoch: int = 0
 
     def rx_info(self):
+        """Pack the receive metadata exposed on the hardware response interface."""
         if not self.packet:
             result = int(self.result) << 376
             mask = 0xff << 376
@@ -230,9 +245,11 @@ class Decoded:
 
 
 def parse_frame(frame, *, max_frame=1536, allow_zero=True):
+    """Classify a frame through framing, layer-two, IPv4, and UDP validation in order."""
     size = len(frame)
 
     def bad(code):
+        """Create a failed receive decision with its explicit validation code."""
         return Decoded(code, min(size, max_frame))
 
     if size > max_frame:
@@ -303,6 +320,7 @@ class Match:
     mask: int = 0
 
     def matches(self, observed):
+        """Apply the field mask and compare only the bits selected by the rule."""
         return (observed & self.mask) == (self.value & self.mask)
 
 
@@ -319,6 +337,7 @@ class Rule:
     queue: int = 0
 
     def matches(self, packet):
+        """Check all of this rule's enabled field predicates against the decoded packet."""
         tci = packet.tags[0][1] if packet.tags else 0
         return self.enabled and all((
             self.src_ip.matches(packet.src_ip), self.dst_ip.matches(packet.dst_ip),
@@ -327,6 +346,7 @@ class Rule:
         ))
 
     def encode(self):
+        """Pack match fields, priority controls, and the receive queue into the hardware row."""
         return bit_fields(
             (self.src_ip.value,32),(self.src_ip.mask,32),(self.enabled,1),(self.drop,1),
             (self.queue,3),(self.tags.value,2),(self.tags.mask,2),(0,7),
@@ -337,6 +357,7 @@ class Rule:
 
 
 def classify(decoded, rules, epoch=0):
+    """Choose the first enabled matching rule according to the hardware priority order."""
     if decoded.result != Result.OK:
         return replace(decoded, epoch=epoch)
     for entry in rules:
@@ -357,13 +378,16 @@ class TxDescriptor:
 
     @property
     def length(self):
+        """Return the byte length carried by the descriptor for this payload."""
         return len(self.packet.payload) if self.payload_size is None else self.payload_size
 
     @property
     def tags(self):
+        """Return the VLAN tags requested by the transmit policy."""
         return len(self.packet.tags) if self.tags_override is None else self.tags_override
 
     def encode(self):
+        """Pack the transmit descriptor into the hardware ABI field order."""
         p = self.packet
         outer = p.tags[0][1] if p.tags else 0
         inner = p.tags[1][1] if len(p.tags) > 1 else 0
@@ -375,6 +399,7 @@ class TxDescriptor:
         )
 
     def expected(self, beats, *, max_payload=1472):
+        """Build the transmitted Ethernet bytes if descriptor and payload validation pass."""
         if self.tags > 2 or not self.packet.ttl or self.length > max_payload or self.reserved:
             return Result.TX_DESCRIPTOR, b""
         if self.length:

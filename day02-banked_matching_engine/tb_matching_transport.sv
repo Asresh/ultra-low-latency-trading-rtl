@@ -43,6 +43,7 @@ module tb_matching_transport;
     logic [PORTS-1:0] keep_driving;
     logic [31:0] rng = 32'h8492_610b;
 
+    // Advance the testbench PRNG and draw a deterministic value below limit.
     function automatic integer roll(input integer limit);
         rng = rng ^ (rng << 13);
         rng = rng ^ (rng >> 17);
@@ -50,6 +51,7 @@ module tb_matching_transport;
         roll = int'(rng % $unsigned(limit));
     endfunction
 
+    // Clear all expected queues, grants, and held output state when the DUT resets.
     task automatic reset_scoreboard;
         first = 0;
         locked = -1;
@@ -60,6 +62,7 @@ module tb_matching_transport;
         end
     endtask
 
+    // Offer per-lane randomized beats while leaving any stalled beat unchanged.
     task automatic generate_sources(input integer step);
         for (integer lane = 0; lane < PORTS; lane++) begin
             if (rst) begin
@@ -78,6 +81,7 @@ module tb_matching_transport;
         end
     endtask
 
+    // Find the next eligible egress lane using the scoreboard's round-robin cursor.
     function automatic integer expected_lane;
         integer candidate;
         if (locked >= 0) begin
@@ -92,6 +96,7 @@ module tb_matching_transport;
         end
     endfunction
 
+    // Verify one edge of ingress, egress, and occupancy before updating the reference queues.
     task automatic check_cycle(input integer step);
         integer selected, occupancy, pushes;
         logic [PORTS-1:0] expected_grant, accepted;

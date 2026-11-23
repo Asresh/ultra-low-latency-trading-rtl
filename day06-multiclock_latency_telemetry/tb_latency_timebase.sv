@@ -66,6 +66,7 @@ module tb_latency_timebase;
         end
     end
 
+    // Issue a fixed-point period change and check the timebase's update protocol.
     task automatic set_period(input logic [31:0] integer_value, input logic [31:0] fraction);
         begin
             @(negedge clk);
@@ -78,6 +79,7 @@ module tb_latency_timebase;
         end
     endtask
 
+    // Drive a PPS transition at the requested clock phase.
     task automatic pps_signal(input integer phase);
         begin
             @(negedge clk);

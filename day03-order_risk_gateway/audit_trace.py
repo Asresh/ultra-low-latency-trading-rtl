@@ -30,6 +30,7 @@ class Frame:
 
 
 def file_words(source, binary):
+    """Yield complete 32-bit words from a binary or line-oriented hexadecimal capture."""
     if binary:
         index = 0
         while True:
@@ -55,11 +56,13 @@ def file_words(source, binary):
 
 
 def frame_records(words, profile, first_id=0):
+    """Validate audit header, sequence, payload, and CRC before yielding each decoded frame."""
     next_id = first_id
     stream = iter(words)
     parsed = 0
 
     def take(label):
+        """Read the next word or report which part of the current frame was truncated."""
         try:
             return next(stream)
         except StopIteration as exc:
@@ -92,6 +95,7 @@ def frame_records(words, profile, first_id=0):
 
 
 def expected_rows(source):
+    """Read decimal scoreboard rows with line numbers for malformed values."""
     for row, line in enumerate(source, 1):
         if not line.strip():
             continue
@@ -103,6 +107,7 @@ def expected_rows(source):
 
 
 def check_trace(actual, expected):
+    """Compare every audit decision to its expected fields and reject missing or extra frames."""
     statuses = Counter()
     count = 0
     for count, (frame, want) in enumerate(zip_longest(actual, expected), 1):
@@ -129,6 +134,7 @@ def check_trace(actual, expected):
 
 
 def first_id_value(raw):
+    """Parse the first expected frame identifier with its unsigned wire-width limit."""
     if raw == "any":
         return None
     value = int(raw, 0)
@@ -138,6 +144,7 @@ def first_id_value(raw):
 
 
 def main():
+    """Parse command-line options, then run audit decoding or comparison on the selected profile."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("dump", "check"))
     parser.add_argument("--profile", choices=PROFILES, default="narrow")

@@ -163,6 +163,7 @@ module ouch_order_session #(
         end
     end
 
+    // Assemble one session-level status record with its associated fields.
     function automatic notice_t session_notice(
         input notice_kind_t kind, input status_t code,
         input logic [63:0] seq_id, input logic [15:0] reason

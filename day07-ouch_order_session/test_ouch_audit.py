@@ -48,15 +48,18 @@ SYMBOL = b"TEST    "
 
 class Capture:
     def __init__(self):
+        """Start a fresh chronological synthetic link and packet transcript."""
         self.clock = 0
         self.records: list[CaptureEntry] = []
 
     def event(self, kind: str, delta: int = 10, **kwargs) -> int:
+        """Append a timed link, marker or data event to the synthetic transcript."""
         self.clock += delta
         self.records.append(CaptureEntry(self.clock, kind, **kwargs))
         return self.clock
 
     def send(self, kind: str, frame: bytes, split: int | None = None) -> int:
+        """Split or drive the selected fixture bytes while retaining their order."""
         if split is None:
             return self.event(kind, fragment=frame)
         self.assert_positive_fragment(frame, split)
@@ -65,10 +68,12 @@ class Capture:
 
     @staticmethod
     def assert_positive_fragment(frame: bytes, split: int) -> None:
+        """Reject split positions that would create empty captured fragments."""
         if not 0 < split < len(frame):
             raise ValueError("split must be interior to the frame")
 
     def connect(self, requested: int = 1, accepted: int = 1, initial: bool = True) -> None:
+        """Append a link-up and login negotiation to the test transcript."""
         self.event("link", up=True)
         login = Login(USERNAME, SECRET, sequence=requested)
         if not initial:
@@ -77,20 +82,24 @@ class Capture:
         self.send("rx", login_accepted(SESSION_ID, accepted), split=11)
 
     def disconnect(self) -> None:
+        """Append a dated link-down transition to the fixture."""
         self.event("link", up=False)
 
     def market(self, reason: str = "S") -> bytes:
+        """Append a venue market-state message with the requested reason code."""
         frame = VenueEvent("S", 125000, reason=ord(reason)).frame()
         self.send("rx", frame)
         return frame
 
 
 def enter(ref: int, quantity: int = 12, price: int = 7_100) -> ClientOrder:
+    """Construct and drive a new-order request with the specified fixture fields."""
     return ClientOrder("O", ref, quantity, price, side="B", symbol=SYMBOL, tif="0",
                        display="Y", client_id=f"N{ref:012x} ".encode("ascii"))
 
 
 def accept(ref: int, quantity: int = 12, price: int = 7_100) -> bytes:
+    """Build the venue acknowledgment corresponding to the fixture new order."""
     order = enter(ref, quantity, price)
     return VenueEvent("A", 132223, order.ref, quantity=order.quantity,
                       price=order.price, symbol=order.symbol, side=order.side,
@@ -99,6 +108,7 @@ def accept(ref: int, quantity: int = 12, price: int = 7_100) -> bytes:
 
 class CaptureTests(unittest.TestCase):
     def test_split_login_replayed_prefix_and_exact_journal_retry(self):
+        """Cover the split login replayed prefix and exact journal retry regression case."""
         script = Capture()
         script.connect()
         opening = script.market()
@@ -142,6 +152,7 @@ class CaptureTests(unittest.TestCase):
         self.assertNotIn(SECRET.decode("ascii").strip(), serialized)
 
     def test_disconnect_discards_partial_both_directions(self):
+        """Cover the disconnect discards partial both directions regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -161,6 +172,7 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue(all(p.epoch == 1 for p in cuts))
 
     def test_pending_identity_cannot_be_rewritten_under_same_reference(self):
+        """Cover the pending identity cannot be rewritten under same reference regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -171,6 +183,7 @@ class CaptureTests(unittest.TestCase):
             audit_json_lines(script.records)
 
     def test_forward_gap_rejected_while_committed_cursor_stays_anchored(self):
+        """Cover the forward gap rejected while committed cursor stays anchored regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -186,6 +199,7 @@ class CaptureTests(unittest.TestCase):
             audit_json_lines(script.records)
 
     def test_late_framing_fault_in_same_fragment_keeps_earlier_deliveries(self):
+        """Cover the late framing fault in same fragment keeps earlier deliveries regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -198,6 +212,7 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue(audit.shutdown_required)
 
     def test_required_post_end_socket_transition(self):
+        """Cover the required post end socket transition regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -210,6 +225,7 @@ class CaptureTests(unittest.TestCase):
         self.assertFalse(audit.summary()["open_socket"])
 
     def test_snapshot_query_before_and_after_order_terminal(self):
+        """Cover the snapshot query before and after order terminal regression case."""
         session = Session(slots=4)
         session.link(True)
         session.request_login(Login(USERNAME, SECRET))
@@ -236,6 +252,7 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(query.kind, NoticeKind.COMMAND)
 
     def test_saturation_metrics_preserve_no_wrap(self):
+        """Cover the saturation metrics preserve no wrap regression case."""
         audit = TranscriptAuditor()
         audit.session.metrics.socket_frames = (1 << 32) - 1
         script = Capture()
@@ -246,6 +263,7 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(audit.summary()["counters"]["socket_frames"], (1 << 32) - 1)
 
     def test_moved_back_time_empty_data_and_transport_failures(self):
+        """Cover the moved back time empty data and transport failures regression case."""
         invalid_sets = (
             ([CaptureEntry(1, "tx", b"1")], "transport down"),
             ([CaptureEntry(9, "link", up=True), CaptureEntry(8, "mark", label="x")],
@@ -271,6 +289,7 @@ class CaptureTests(unittest.TestCase):
                     CaptureEntry.load(row)
 
     def test_unanswered_capture_tombstone_and_eof_tail(self):
+        """Cover the unanswered capture tombstone and EOF tail regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -282,6 +301,7 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(result["first_attempt"]["samples"], 0)
 
     def test_prunes_inflight_replace_when_old_reference_cancels(self):
+        """Cover the prunes inflight replace when old reference cancels regression case."""
         script = Capture()
         script.connect()
         script.market()
@@ -298,6 +318,7 @@ class CaptureTests(unittest.TestCase):
 
 class SchemaTests(unittest.TestCase):
     def test_dynamic_capture_path_line_numbers_and_invalid_units(self):
+        """Cover the dynamic capture path line numbers and invalid units regression case."""
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "trace.jsonl"
             path.write_text('\n{"t": 0, "kind": "link", "up": true}\n{"broken": true}\n',
@@ -308,7 +329,9 @@ class SchemaTests(unittest.TestCase):
                 next(items)
 
     def test_simulation_word_file_canonical_bytes(self):
+        """Cover the simulation word file canonical bytes regression case."""
         def lines(frames: list[bytes]) -> str:
+            """Format simulation rows for the provided complete byte frames."""
             return "".join(f"{len(frame)} {int.from_bytes(frame, 'little'):x}\n" for frame in frames)
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -333,6 +356,7 @@ class SchemaTests(unittest.TestCase):
                 check_tx_capture(observed, expected)
 
     def test_packed_record_width_overflow_is_rejected(self):
+        """Cover the packed record width overflow is rejected regression case."""
         instances = [COMMAND_WIDTHS, NOTICE_WIDTHS]
         for widths in instances:
             values = [(1 << width) - 1 for width in widths]

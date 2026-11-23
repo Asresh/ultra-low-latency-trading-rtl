@@ -1,6 +1,6 @@
 # Ultra Low Latency Trading RTL
 
-Eight independent FPGA hardware projects in the [RTL Projects Everyday](https://github.com/Asresh/RTL-Projects-Everyday) format. Each day folder puts the synthesizable SystemVerilog, self-checking verification, Makefile, and design README together. The original three projects cover market-data recovery, venue matching, and risk. Days 04–08 extend the portfolio into transport, market state, measurement, order entry, and host/FPGA data movement.
+Thirteen independent FPGA hardware projects in the [RTL Projects Everyday](https://github.com/Asresh/RTL-Projects-Everyday) format. Each day folder puts synthesizable SystemVerilog, self-checking verification, a Makefile, and a design README together. Days 01–08 cover trading subsystems. Days 10–14 each teach a smaller reusable hardware building block with a detailed test suite.
 
 | Day | Project | Design problem |
 | --- | --- | --- |
@@ -12,6 +12,14 @@ Eight independent FPGA hardware projects in the [RTL Projects Everyday](https://
 | 06 | [Multiclock latency telemetry](day06-multiclock_latency_telemetry/) | Timestamp and correlate observations from unrelated clocks, then export histogram snapshots and triggered records without stopping the active bank. |
 | 07 | [Nasdaq OUCH and SoupBinTCP session](day07-ouch_order_session/) | Encode and decode an official protocol subset, preserve committed order state, and reconcile session replay after transport loss. |
 | 08 | [Host/FPGA DMA queues](day08-host_dma_queues/) | Service host submission and completion rings, transfer verified payloads in both directions, and preserve credits across backpressure and bus faults. |
+| 09 | [Multi-venue smart order router prompt](prompt.md) | Design brief for a future project. |
+| 10 | [Packet stream-width converter](day10-stream_width_converter/) | Pack and unpack byte lanes while preserving payload order, boundaries, and tags. |
+| 11 | [Best quote selector](day11-best_quote_selector/) | Select one best bid and best ask from a small set of venues using deterministic ties and stale-quote handling. |
+| 12 | [Message rate limiter](day12-message_rate_limiter/) | Admit messages with a per-key token bucket and test burst capacity, refill, and backpressure. |
+| 13 | [Timestamped stream replayer](day13-timestamped_stream_replayer/) | Load a short event tape and replay it on a clock under pause and output stalls. |
+| 14 | [Fixed-point notional calculator](day14-fixed_point_notional/) | Compute quantity times price, round fees and cash amounts, and check a cash limit. |
+
+Days 10–14 each have at least 5,001 substantive source lines across RTL, verification, and tools. Comments, docstrings, blank lines, generated artifacts, and READMEs are excluded from the count. Python functions and SystemVerilog functions and tasks have explanations at their definitions.
 
 ## Run and inspect
 

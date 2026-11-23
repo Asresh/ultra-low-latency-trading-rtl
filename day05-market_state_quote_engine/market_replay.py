@@ -30,6 +30,7 @@ class FeedRow:
     command: Optional[Command] = None
 
     def mapping(self) -> Dict:
+        """Serialize host arrival and ready controls to the CSV field layout."""
         row = {name: int(getattr(self, name)) for name in INPUT_FIELDS}
         if self.command:
             row.update({
@@ -43,6 +44,7 @@ class FeedRow:
 
 
 def as_int(mapping: Dict[str, str], field: str, default: Optional[int] = None) -> int:
+    """Convert one named integer using the declared fallback for a blank field."""
     raw = mapping[field]
     if raw is None or not raw.strip():
         if default is None:
@@ -55,6 +57,7 @@ def as_int(mapping: Dict[str, str], field: str, default: Optional[int] = None) -
 
 
 def as_bool(mapping: Dict[str, str], field: str, default: bool) -> bool:
+    """Read a Boolean field and reject values outside the permitted encoding."""
     value = as_int(mapping, field, int(default))
     if value not in (0, 1):
         raise ValueError(f"{field} must be 0 or 1")
@@ -62,6 +65,7 @@ def as_bool(mapping: Dict[str, str], field: str, default: bool) -> bool:
 
 
 def decode_op(value: str) -> int:
+    """Translate symbolic opcodes while preserving numeric reserved opcode tests."""
     try:
         return int(Operation[value.strip().upper()])
     except KeyError:
@@ -72,6 +76,7 @@ def decode_op(value: str) -> int:
 
 
 def parse_row(mapping: Dict[str, str], config: Config) -> FeedRow:
+    """Validate a replay CSV row and construct its optional source command."""
     cycle = as_int(mapping, "cycle")
     if not 0 <= cycle < MAX_REPLAY_CYCLES:
         raise ValueError(f"cycle must be in 0..{MAX_REPLAY_CYCLES-1}")
@@ -103,6 +108,7 @@ def parse_row(mapping: Dict[str, str], config: Config) -> FeedRow:
 
 
 def read_rows(data: TextIO, config: Config) -> Iterator[FeedRow]:
+    """Stream increasing cycle records and report malformed data with line context."""
     source = csv.DictReader(data)
     if tuple(source.fieldnames or ()) != CSV_FIELDS:
         raise ValueError(f"expected CSV header {','.join(CSV_FIELDS)}")
@@ -121,6 +127,7 @@ def read_rows(data: TextIO, config: Config) -> Iterator[FeedRow]:
 
 
 def write_rows(out: TextIO, rows: Iterable[FeedRow]) -> None:
+    """Write replay events in canonical CSV column order."""
     writer = csv.DictWriter(out, fieldnames=CSV_FIELDS)
     writer.writeheader()
     for row in rows:
@@ -151,11 +158,13 @@ class Journal:
     dropped_ingress: int
 
     def mapping(self) -> Dict:
+        """Convert a journal cycle and its nested records to serializable dictionaries."""
         return asdict(self)
 
 
 class ReplaySession:
     def __init__(self, cfg: Config, capacity: int = 128):
+        """Set up a bounded source backlog and independent downstream modeled state."""
         if capacity <= 0:
             raise ValueError("host backlog capacity must be positive")
         self.cfg = cfg
@@ -167,6 +176,7 @@ class ReplaySession:
         self.counters: Counter = Counter()
 
     def apply_gates(self, eligible: Tuple[bool, ...], epochs: Tuple[int, ...]) -> Tuple[int, ...]:
+        """Withdraw active quotes whose epoch or eligibility no longer matches current state."""
         changes: List[int] = []
         for bank in sorted(self.installed):
             existing = self.installed[bank]
@@ -181,6 +191,7 @@ class ReplaySession:
         self, quote: Optional[Quote], ready: bool, current: bool,
         eligible: Tuple[bool, ...], epochs: Tuple[int, ...],
     ) -> str:
+        """Classify a transferred quote as current, stale, or an explicit withdrawal."""
         if quote is None:
             return "idle"
         if not ready:
@@ -199,6 +210,7 @@ class ReplaySession:
         return "withdraw_intent"
 
     def step(self, row: FeedRow) -> Journal:
+        """Drive a replay cycle and record its accepted commands and output decisions."""
         if row.cycle != self.cycle:
             raise ValueError(f"row at cycle {row.cycle}, expected {self.cycle}")
         dropped = 0
@@ -246,6 +258,7 @@ class ReplaySession:
         return report
 
     def expand(self, events: Iterable[FeedRow], tail: int = 0) -> Iterator[Journal]:
+        """Fill gaps between scheduled arrivals and optionally drain trailing cycles."""
         if tail < 0:
             raise ValueError("tail must be nonnegative")
         for row in events:
@@ -269,6 +282,7 @@ class ReplaySession:
         raise RuntimeError("the offline RTL behavior failed to reach a quiescent state")
 
     def inventory(self) -> List[Dict]:
+        """Export validated active orders and diagnostics grouped by instrument."""
         banks = []
         for index, instrument in enumerate(self.model.instruments):
             banks.append({
@@ -299,6 +313,7 @@ class ReplaySession:
 
 
 def fixture(cfg: Config) -> Iterator[FeedRow]:
+    """Create a small replay workload that exercises common mode and transport transitions."""
     cycle = 0
     yield FeedRow(cycle, reset=True)
     cycle += 2
@@ -306,6 +321,7 @@ def fixture(cfg: Config) -> Iterator[FeedRow]:
     tag = 0
 
     def command(bank: int, op: Operation, seq: int, **payload) -> Command:
+        """Build a correctly sized command for an event in the synthetic fixture."""
         nonlocal tag
         data = Command(instrument=bank, op=op, sequence=seq, tag=tag, **payload)
         tag = (tag + 1) & cfg.mask(cfg.tag_width)
@@ -347,6 +363,7 @@ def fixture(cfg: Config) -> Iterator[FeedRow]:
 
 
 def replay(args: argparse.Namespace) -> None:
+    """Read the scheduled feed and write its predicted output journal."""
     cfg = PROFILES[args.profile]
     session = ReplaySession(cfg, args.capacity)
     with args.file.open(newline="", encoding="utf-8") as source, args.out.open("w", encoding="utf-8") as out:
@@ -363,6 +380,7 @@ def replay(args: argparse.Namespace) -> None:
 
 
 def arguments() -> argparse.Namespace:
+    """Define input, geometry, and output choices for the replay command."""
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_subparsers(dest="operation", required=True)
     fixture_cmd = modes.add_parser("fixture", help="write a synthetic CSV including faults and expiry")
@@ -379,6 +397,7 @@ def arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run the requested fixture or replay operation."""
     args = arguments()
     if args.operation == "fixture":
         with args.file.open("w", newline="", encoding="utf-8") as out:

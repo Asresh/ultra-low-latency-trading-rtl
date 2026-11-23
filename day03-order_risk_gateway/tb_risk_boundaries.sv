@@ -96,6 +96,7 @@ module tb_risk_boundaries;
         end
     end
 
+    // Apply the supplied risk operation and identity fields to the request pins.
     task automatic drive_order(
         input logic [2:0] op,
         input integer tag, slot, generation, seq_num, price, qty
@@ -112,6 +113,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Wait for the current request handshake at the active edge.
     task automatic wait_issue;
         begin
             do @(posedge clk); while (!s_ready);
@@ -121,6 +123,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Drive an order and wait until the request has been admitted to the pipeline.
     task automatic issue(
         input logic [2:0] op,
         input integer tag, slot, generation, seq_num, price, qty
@@ -132,6 +135,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Set the risk policy inputs using the requested enable and exposure limits.
     task automatic drive_policy(input logic enable, input integer cap, count);
         begin
             cfg_enable = enable;
@@ -144,6 +148,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Commit the prepared policy before exercising the request path.
     task automatic configure;
         begin
             @(negedge clk);
@@ -154,6 +159,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Wait for one result and check its status and visible accounting fields.
     task automatic expect_reply(
         input logic [2:0] op,
         input integer tag, slot, generation, seq_num,
@@ -178,6 +184,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Pulse reset and initialize the gateway controls for a directed case.
     task automatic reset_gateway;
         begin
             @(negedge clk);
@@ -194,6 +201,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Exercise request and policy interleavings under a full response path.
     task automatic test_fifo_and_config;
         time first_issue;
         begin
@@ -247,6 +255,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Verify the emergency stop around the pending request's commit edge.
     task automatic test_commit_halt;
         begin
             reset_gateway();
@@ -267,6 +276,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Apply reset while a request or response is in flight.
     task automatic test_active_reset;
         begin
             reset_gateway();
@@ -287,6 +297,7 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // Check admission and lifecycle boundary cases that reject invalid state changes.
     task automatic test_fault_paths;
         begin
             reset_gateway();

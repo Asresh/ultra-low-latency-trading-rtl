@@ -57,6 +57,7 @@ module latency_registers #(
     logic [63:0] latched_tick, latched_ns;
     logic [31:0] latched_fraction;
 
+    // Replace only register bytes selected by the AXI-Lite write strobes.
     function automatic logic [31:0] merge_bytes(
         input logic [31:0] old_value,
         input logic [31:0] candidate,

@@ -35,6 +35,7 @@ module tb_latency_histogram;
     integer sample_total = 0;
     integer stalls = 0;
 
+    // Generate the next deterministic state for the test's randomized choices.
     function automatic logic [31:0] advance(input logic [31:0] value);
         logic [31:0] s;
         begin
@@ -67,6 +68,7 @@ module tb_latency_histogram;
         end
     end
 
+    // Request a histogram snapshot and drain the captured payload on ready/valid.
     task automatic send_snapshot(
         input integer sample_count, input integer word_count, input logic [63:0] deadline
     );

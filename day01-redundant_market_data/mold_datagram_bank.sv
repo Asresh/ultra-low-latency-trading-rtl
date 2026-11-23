@@ -69,6 +69,7 @@ module mold_datagram_bank #(
     logic [16:0] block_end;
     logic last_block, bad_block_shape;
 
+    // Return the valid byte count for a contiguous low-byte enable mask.
     function automatic logic [3:0] keep_bytes(input logic [7:0] keep);
         case (keep)
             8'h01: keep_bytes = 4'd1;

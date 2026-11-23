@@ -52,22 +52,27 @@ class Profile:
     sequence_width: int = 8
 
     @property
+    # Return the sequence counter mask for this profile's modular arithmetic.
     def count_mask(self) -> int:
         return (1 << self.sequence_width) - 1
 
     @property
+    # Return the largest individual order quantity the input field can encode.
     def qty_max(self) -> int:
         return (1 << self.quantity_width) - 1
 
     @property
+    # Return the largest encoded instrument number, including out-of-range test values.
     def instrument_max(self) -> int:
         return (1 << self.banks.bit_length()) - 1
 
     @property
+    # Return the largest encoded order identifier.
     def id_max(self) -> int:
         return (1 << self.slots.bit_length()) - 1
 
     @property
+    # Return the largest encoded price before checking the configured level count.
     def price_max(self) -> int:
         return (1 << self.prices.bit_length()) - 1
 
@@ -90,6 +95,7 @@ class Command:
     quantity: int = 1
     tag: int = 0
 
+    # Flatten the command into the field order expected by the simulation reader.
     def vector(self) -> Tuple[int, ...]:
         return tuple(int(getattr(self, f.name)) for f in fields(self))
 
@@ -135,6 +141,7 @@ class Result:
     level_count: int = 0
 
     @staticmethod
+    # Build a terminal result carrying the specified rejection reason.
     def invalid(reason: Reject) -> "Result":
         return Result(kind=Kind.REJECT, reject=reason)
 
@@ -142,11 +149,13 @@ class Result:
 class Book:
     """The model makes no assumptions about RTL linked lists or occupancy."""
 
+    # Allocate one independent software book and reset its local order state.
     def __init__(self, profile: Profile):
         self.profile = profile
         self.orders: Dict[int, Order] = {}
         self.age = 0
 
+    # Sum open quantity and count the orders resting on one side at this price.
     def level(self, side: bool, price: int) -> Tuple[int, int]:
         entries = tuple(
             order for order in self.orders.values()
@@ -155,6 +164,7 @@ class Book:
         return sum(order.quantity for order in entries), len(entries)
 
     @staticmethod
+    # Decide whether a maker's limit trades against an opposite-side incoming order.
     def crosses(command: Command, maker: Order) -> bool:
         if maker.side == command.side:
             return False
@@ -162,6 +172,7 @@ class Book:
             return maker.price >= command.price
         return maker.price <= command.price
 
+    # Yield crossing makers sorted by best execution price and then arrival order.
     def eligible(self, command: Command) -> Iterator[Tuple[int, Order]]:
         makers = [
             (order_id, order)
@@ -174,6 +185,7 @@ class Book:
         ))
         return iter(makers)
 
+    # Return the selected price level or the applicable query rejection.
     def query(self, command: Command) -> List[Result]:
         if command.price >= self.profile.prices:
             return [Result.invalid(Reject.PRICE)]
@@ -186,6 +198,7 @@ class Book:
             level_count=count,
         )]
 
+    # Apply cancel or reduction to an existing order while preserving surviving priority.
     def modify(self, command: Command, resting: Optional[Order]) -> List[Result]:
         if resting is None:
             return [Result.invalid(Reject.ABSENT)]
@@ -208,6 +221,7 @@ class Book:
             remaining=command.quantity,
         )]
 
+    # Validate a new order, match it against ranked makers, and handle the remaining quantity.
     def add(self, command: Command, resting: Optional[Order]) -> List[Result]:
         if command.price >= self.profile.prices:
             return [Result.invalid(Reject.PRICE)]
@@ -265,6 +279,7 @@ class Book:
             ))
         return results
 
+    # Dispatch one command within this instrument and check its resulting book state.
     def apply(self, command: Command) -> List[Result]:
         if command.opcode == Opcode.LEVEL:
             results = self.query(command)
@@ -280,6 +295,7 @@ class Book:
         self.check_results(command, results)
         return results
 
+    # Verify live-order IDs, quantities, and priority bookkeeping stay consistent.
     def check_invariants(self) -> None:
         bids = []
         asks = []
@@ -301,6 +317,7 @@ class Book:
         if bids and asks and max(bids) >= min(asks):
             raise AssertionError("model produced crossed liquidity")
 
+    # Check returned events for termination and quantities appropriate to the original command.
     def check_results(self, command: Command, results: List[Result]) -> None:
         if not results or any(result.last for result in results[:-1]) or not results[-1].last:
             raise AssertionError(f"bad terminal events for {command}: {results}")
@@ -314,6 +331,7 @@ class Book:
 
 
 class Reference:
+    # Allocate independent instrument books and per-lane sequence counters for the chosen profile.
     def __init__(self, profile: Profile):
         self.profile = profile
         self.books = []
@@ -321,14 +339,17 @@ class Reference:
         self.event_seq: List[int] = []
         self.reset()
 
+    # Discard resting orders and return all command and event lanes to their initial sequence values.
     def reset(self) -> None:
         self.books = [Book(self.profile) for _ in range(self.profile.banks)]
         self.command_seq = [0] * (self.profile.banks + 1)
         self.event_seq = [0] * (self.profile.banks + 1)
 
+    # Map a valid instrument to its own lane and route invalid instruments to the shared error lane.
     def lane_for(self, instrument: int) -> int:
         return min(instrument, self.profile.banks)
 
+    # Execute one command and attach lane-local command and event sequences to its results.
     def execute(self, command: Command) -> List[Event]:
         lane = self.lane_for(command.instrument)
         if lane == self.profile.banks:

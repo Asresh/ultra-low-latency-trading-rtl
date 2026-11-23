@@ -31,6 +31,7 @@ module risk_audit_serializer #(
     reg [31:0] frame_id;
     reg [31:0] crc_accumulator;
 
+    // Fold a word into the current CRC in the serializer's bit transmission order.
     function automatic [31:0] advance_crc(input [31:0] crc, input [31:0] word_data);
         reg [31:0] running;
         integer i;

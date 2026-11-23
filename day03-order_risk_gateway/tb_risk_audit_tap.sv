@@ -69,6 +69,7 @@ module tb_risk_audit_tap #(
         end
     end
 
+    // Drive one audit tap cycle while independently controlling both result sinks.
     task automatic step(input integer record_id, input logic incoming, primary_ready, audit_ready);
         begin
             @(negedge clk);
@@ -81,6 +82,7 @@ module tb_risk_audit_tap #(
     endtask
 
     logic [31:0] prng = 32'h0571_b32e;
+    // Step the fixed-seed pseudo-random generator used for repeatable test patterns.
     function automatic [31:0] random_next(input [31:0] value);
         logic [31:0] next;
         begin

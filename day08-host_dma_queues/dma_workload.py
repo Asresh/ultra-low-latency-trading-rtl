@@ -27,6 +27,7 @@ class Work:
     observed_crc: int = 0
 
     def request_image(self):
+        """Return the serialized submission and capture input for the replay bundle."""
         d = self.descriptor
         return {
             "queue": self.lane,
@@ -52,10 +53,12 @@ CASES = (
 
 
 def random_bytes(rng, length):
+    """Generate deterministic fixture data of the requested length."""
     return bytes(rng.randrange(256) for _ in range(length))
 
 
 def make_item(rng,lane,ordinal,aperture,kind):
+    """Create one workload entry with its expected status and data geometry."""
     page = (3*ordinal+1)*4096
     # Alternate apertures crossing a page just after the first beat and
     # interior addresses crossing one or more 16-beat burst limits.
@@ -110,6 +113,7 @@ def make_item(rng,lane,ordinal,aperture,kind):
 
 
 def config_for(lane,depth,requests):
+    """Create nonoverlapping queue rings and payload space for this traffic lane."""
     ring = 0x10000+lane*0x4000
     low = 0x2000000+lane*0x10000000
     return QueueConfig(Ring(ring,depth),Ring(ring+0x2000,depth),
@@ -117,6 +121,7 @@ def config_for(lane,depth,requests):
 
 
 def build_workload(seed,requests,depth):
+    """Generate a reproducible mixture of transfer sizes, operations and failures."""
     if not len(CASES) <= requests <= 1024:
         raise ValueError(f"requests per queue must be between {len(CASES)} and 1024")
     rng = random.Random(seed)
@@ -141,6 +146,7 @@ class Run:
     reaped: tuple
 
     def summary(self):
+        """Return run counters, diagnostics and measured distributions as structured fields."""
         transaction_counts = Counter(event["event"] for event in self.events)
         return {
             "completed":self.model.completed,
@@ -155,6 +161,7 @@ class Run:
 
 
 def assert_completion(wanted,completion):
+    """Compare the actual completion fields with this workload entry."""
     d = wanted.descriptor
     expected_id = (wanted.lane,d.op,d.tag,d.cookie)
     identity = (completion.queue,completion.op,completion.tag,completion.cookie)
@@ -168,6 +175,7 @@ def assert_completion(wanted,completion):
 
 
 def assert_body_effect(memory,item,fill):
+    """Check the expected payload changes and untouched memory sentinels."""
     d = item.descriptor
     if item.push:
         rounded_len = rounded(d.length)
@@ -183,6 +191,7 @@ def assert_body_effect(memory,item,fill):
 
 
 def verify_burst_shapes(trace):
+    """Reject burst traces with invalid masks, limits or page crossings."""
     open_transfers = {}
     for entry in trace:
         key = entry.queue,entry.phase
@@ -221,6 +230,7 @@ def verify_burst_shapes(trace):
 
 
 def exercise(configs,entries,seed):
+    """Run the model on a workload with deterministic scheduling and fault injection."""
     rng = random.Random(seed^0xae4320)
     fill = 0xa5
     memory = SparseMemory(fill=fill)
@@ -238,6 +248,7 @@ def exercise(configs,entries,seed):
     previous_emissions = 0
 
     def log(event,**fields):
+        """Capture a transition in the host workload's chronological output."""
         trace.append({"event":event,**fields})
 
     for tick in range(1,len(all_items)*40+200):
@@ -300,6 +311,7 @@ def exercise(configs,entries,seed):
 
 
 def export(configs,entries,result):
+    """Write the request image, model outcomes and run statistics for external audit."""
     return {
         "format":"host_dma_audit_v1",
         "config":[asdict(config) for config in configs],
@@ -313,6 +325,7 @@ def export(configs,entries,result):
 
 
 def main():
+    """Generate, run and export one deterministic DMA workload."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--seed",type=int,default=8088)
     ap.add_argument("--requests",type=int,default=96)

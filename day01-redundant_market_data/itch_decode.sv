@@ -60,6 +60,7 @@ module itch_decode (
     } event_t;
 
     // Tuple: supported, index of final beat, final keep mask.
+    // Look up the exact payload length and normalized event fields for a supported ITCH type.
     function automatic logic [11:0] shape(input logic [7:0] msg_type);
         case (msg_type)
             "A": shape = {1'b1, 3'd4, 8'h0f}; // 36 bytes
@@ -73,6 +74,7 @@ module itch_decode (
         endcase
     endfunction
 
+    // Accept only a nonzero contiguous prefix of valid low byte lanes.
     function automatic logic prefix_keep(input logic [7:0] mask);
         case (mask)
             8'h01, 8'h03, 8'h07, 8'h0f, 8'h1f, 8'h3f, 8'h7f, 8'hff:

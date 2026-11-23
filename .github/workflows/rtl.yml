@@ -67,6 +67,11 @@ jobs:
           - {project: day06-multiclock_latency_telemetry, test_target: test}
           - {project: day07-ouch_order_session, test_target: test}
           - {project: day08-host_dma_queues, test_target: test}
+          - {project: day10-stream_width_converter, test_target: test}
+          - {project: day11-best_quote_selector, test_target: test}
+          - {project: day12-message_rate_limiter, test_target: test}
+          - {project: day13-timestamped_stream_replayer, test_target: test}
+          - {project: day14-fixed_point_notional, test_target: test}
     steps:
       - uses: actions/checkout@v5
       - uses: YosysHQ/setup-oss-cad-suite@v4
@@ -79,6 +84,9 @@ jobs:
         run: |
           make -C "${{ matrix.project }}" lint
           make -C "${{ matrix.project }}" synth
-      - name: Verify market-state properties
-        if: matrix.project == 'day05-market_state_quote_engine'
-        run: make -C day05-market_state_quote_engine formal
+      - name: Check formal properties
+        if: matrix.project == 'day05-market_state_quote_engine' || startsWith(matrix.project, 'day1')
+        run: make -C "${{ matrix.project }}" formal
+      - name: Test synthesized rate limiter
+        if: matrix.project == 'day12-message_rate_limiter'
+        run: make -C "${{ matrix.project }}" test-netlist

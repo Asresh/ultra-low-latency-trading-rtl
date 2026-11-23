@@ -210,6 +210,7 @@ module hft_order_risk_gateway #(
         config_value.max_count = cfg_max_open_orders;
     end
 
+    // Apply the configured price, size, and exposure checks before admitting work.
     function automatic [4:0] admission_status(
         input policy_t policy,
         input logic [PRICE_W-1:0] price,
@@ -234,6 +235,7 @@ module hft_order_risk_gateway #(
             admission_status = OK;
     endfunction
 
+    // Retain ownership and event identity while removing remaining exposure from the slot.
     function automatic slot_t terminate_slot(input slot_t prior, input logic [EVENT_W-1:0] sequence_id);
         slot_t cleared;
         begin

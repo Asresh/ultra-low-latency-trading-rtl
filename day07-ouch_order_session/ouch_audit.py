@@ -35,6 +35,7 @@ class CaptureEntry:
 
     @classmethod
     def load(cls, row: object) -> CaptureEntry:
+        """Validate external capture fields and build a normalized typed record."""
         if not isinstance(row, dict):
             raise ValueError("expect a JSON object")
         t = row.get("t")
@@ -62,6 +63,7 @@ class CaptureEntry:
 
 
 def load_json_lines(path: Path) -> Iterator[CaptureEntry]:
+    """Yield parsed capture records and report malformed rows with line context."""
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             if not line.strip():
@@ -110,6 +112,7 @@ class TranscriptAuditor:
     """Track externally observable sequencing and order state across captures."""
 
     def __init__(self, slots: int = 8):
+        """Create independent client/venue framers, a session oracle and audit logs."""
         self.session = Session(slots=slots, tx_ticks=0, rx_ticks=0)
         self.parsers = {direction: SoupStream() for direction in Direction}
         self.rows: list[AuditRow] = []
@@ -125,6 +128,7 @@ class TranscriptAuditor:
 
     @staticmethod
     def _direction_name(direction: Direction) -> str:
+        """Convert the capture direction code to its displayed protocol endpoint."""
         return "tx" if direction == Direction.HOST_TO_PEER else "rx"
 
     def _record(
@@ -138,6 +142,7 @@ class TranscriptAuditor:
         status: Status = Status.OK,
         note: str = "",
     ) -> None:
+        """Append a timestamped diagnosis with offsets and protocol identity."""
         self.rows.append(AuditRow(t, self.epoch, self._direction_name(direction), offset,
                                   op, ref, seq, Status(status).name, note))
         self.counts[f"{self._direction_name(direction)}:{op}"] += 1
@@ -145,6 +150,7 @@ class TranscriptAuditor:
             self.counts[f"error:{Status(status).name}"] += 1
 
     def _link(self, up: bool, time_ns: int) -> None:
+        """Update transport framing and model state at the captured transition."""
         if up == self.session.up:
             raise TranscriptError(f"duplicate link {'up' if up else 'down'} at {time_ns} ns")
         if not up:
@@ -160,6 +166,7 @@ class TranscriptAuditor:
             self.parsers = {direction: SoupStream() for direction in Direction}
 
     def _choose_slot(self, order: ClientOrder) -> int:
+        """Find the effective order slot for the captured operation."""
         target = order.prev if order.kind == "U" else order.ref
         if order.kind != "O":
             for slot, state in self.session.store.orders.items():
@@ -173,6 +180,7 @@ class TranscriptAuditor:
         raise TranscriptError("serialized entry exceeds configured capture order-slot capacity")
 
     def _existing_retry(self, order: ClientOrder, frame: bytes) -> int | None:
+        """Recognize an exact pending request retransmission without creating a new identity."""
         for slot, state in self.session.store.orders.items():
             pending = state.outstanding
             if pending is None or pending.ref != order.ref:
@@ -191,6 +199,7 @@ class TranscriptAuditor:
         return None
 
     def _outbound_order(self, t: int, offset: int, wire: ClientOrder, raw_frame: bytes) -> None:
+        """Decode a captured client command and reconcile it with the expected order ledger."""
         self.tx_tag = (self.tx_tag + 1) & 0xFFFF
         retry_slot = self._existing_retry(wire, raw_frame)
         if retry_slot is not None:
@@ -220,6 +229,7 @@ class TranscriptAuditor:
                      note="journal retry" if retry_slot is not None else "command")
 
     def _from_client(self, frame: Envelope, t: int, offset: int) -> None:
+        """Apply a full client frame to the audit session."""
         kind, decoded = decode_client(frame)
         if kind == "L":
             assert isinstance(decoded, Login)
@@ -241,6 +251,7 @@ class TranscriptAuditor:
             self._record(t, Direction.HOST_TO_PEER, offset, kind)
 
     def _completed(self, notice: Notice, time_ns: int) -> None:
+        """Collect completion latency and reference information for an accepted notice."""
         if notice.kind not in {NoticeKind.ACCEPT, NoticeKind.REPLACE, NoticeKind.REJECT}:
             return
         started = self.unanswered.pop(notice.ref, None)
@@ -251,6 +262,7 @@ class TranscriptAuditor:
         self.counts["completed_entry_attempts"] += started.attempts
 
     def _prune_terminal_journals(self) -> None:
+        """Remove retry bookkeeping that no longer owns a live order."""
         wanted = {
             order.outstanding.ref for order in self.session.store.orders.values()
             if order.outstanding is not None and order.outstanding.kind != CommandKind.CANCEL
@@ -260,6 +272,7 @@ class TranscriptAuditor:
             del self.unanswered[ref]
 
     def _from_peer(self, frame: Envelope, t: int, offset: int) -> None:
+        """Apply a complete venue frame and preserve its sequenced disposition."""
         last = self.session.frame(frame)
         if last is None:
             self._record(t, Direction.PEER_TO_HOST, offset, frame.kind)
@@ -276,6 +289,7 @@ class TranscriptAuditor:
         self._record(t, Direction.PEER_TO_HOST, offset, name, last.ref, last.seq, status, note)
 
     def _fragment(self, entry: CaptureEntry) -> None:
+        """Decode newly captured bytes and preserve any valid frames preceding a fault."""
         if not self.session.up:
             raise TranscriptError(f"byte fragment while transport down at {entry.time_ns}")
         if self.shutdown_required:
@@ -301,6 +315,7 @@ class TranscriptAuditor:
             self.shutdown_required = True
 
     def apply(self, entry: CaptureEntry) -> None:
+        """Apply one checked capture entry to the transcript state."""
         if entry.time_ns < self.last_time:
             raise TranscriptError(f"timestamp moved backward at {entry.time_ns}")
         self.last_time = entry.time_ns
@@ -316,6 +331,7 @@ class TranscriptAuditor:
 
     @staticmethod
     def _latency(samples: list[int]) -> dict[str, int | None]:
+        """Summarize the measured distribution of sample latencies."""
         if not samples:
             return {"samples": 0, "min_ns": None, "p50_ns": None, "p95_ns": None, "max_ns": None}
         ordered = sorted(samples)
@@ -328,6 +344,7 @@ class TranscriptAuditor:
         }
 
     def summary(self) -> dict[str, object]:
+        """Return run counters, diagnostics and measured distributions as structured fields."""
         return {
             "connections": self.epoch,
             "open_socket": self.session.up,
@@ -350,6 +367,7 @@ class TranscriptAuditor:
 
 
 def audit_json_lines(entries: Iterable[CaptureEntry], slots: int = 8) -> TranscriptAuditor:
+    """Consume a complete JSONL transcript into the independent session auditor."""
     audit = TranscriptAuditor(slots)
     for record_index, entry in enumerate(entries, 1):
         try:
@@ -360,6 +378,7 @@ def audit_json_lines(entries: Iterable[CaptureEntry], slots: int = 8) -> Transcr
 
 
 def load_word_frames(path: Path) -> Iterator[bytes]:
+    """Read simulator wide-word captures as canonical framed bytes."""
     with path.open(encoding="ascii") as stream:
         for number, line in enumerate(stream, 1):
             try:
@@ -376,6 +395,7 @@ def load_word_frames(path: Path) -> Iterator[bytes]:
 
 
 def check_tx_capture(hardware: Path, expected: Path) -> Counter[str]:
+    """Compare the hardware transmission capture with expected complete frames."""
     from itertools import zip_longest
 
     counts: Counter[str] = Counter()
@@ -394,6 +414,7 @@ def check_tx_capture(hardware: Path, expected: Path) -> Counter[str]:
 
 
 def parser() -> argparse.ArgumentParser:
+    """Configure CLI argument handling for capture or simulator comparison."""
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(required=True, dest="command")
     dump = commands.add_parser("audit", help="compare a local JSONL capture to the session model")
@@ -408,6 +429,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Run the requested transcript audit or wire-capture comparison."""
     args = parser().parse_args()
     try:
         if args.command == "audit":

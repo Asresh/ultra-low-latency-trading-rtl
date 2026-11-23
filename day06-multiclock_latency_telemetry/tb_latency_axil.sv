@@ -48,6 +48,7 @@ module tb_latency_axil;
     assign rsp_data = response_data;
     assign rsp_status = response_code;
 
+    // Generate the next deterministic state for the test's randomized choices.
     function automatic logic [31:0] advance(input logic [31:0] value);
         logic [31:0] mixed;
         begin
@@ -57,6 +58,7 @@ module tb_latency_axil;
         end
     endfunction
 
+    // Select a test register address from the request index and channel direction.
     function automatic logic [AW-1:0] address(input integer index, input logic write_op);
         logic [31:0] mixed;
         begin
@@ -69,14 +71,17 @@ module tb_latency_axil;
         end
     endfunction
 
+    // Calculate the expected write data from the transaction index.
     function automatic logic [31:0] wr_payload(input integer index);
         wr_payload = advance(32'h74a0fc33 ^ 32'(index * 131317));
     endfunction
 
+    // Select deterministic write strobes for this AXI-Lite fixture.
     function automatic logic [3:0] byte_mask(input integer index);
         byte_mask = 4'(index ^ (index >> 3));
     endfunction
 
+    // Compute the reference AXI response code for this address and operation.
     function automatic logic [1:0] respond_status(input logic [AW-1:0] addr, input logic writing);
         if (addr[11:8] != 0 || addr[1:0] != 0)
             respond_status = 2'b11;
@@ -167,6 +172,7 @@ module tb_latency_axil;
         end
     end
 
+    // Drive the write-address stream independently of W.
     task automatic send_aw;
         logic [31:0] prng;
         integer pause;
@@ -185,6 +191,7 @@ module tb_latency_axil;
         end
     endtask
 
+    // Drive the write-data stream independently of AW.
     task automatic send_w;
         logic [31:0] prng;
         begin
@@ -202,6 +209,7 @@ module tb_latency_axil;
         end
     endtask
 
+    // Drive read addresses and hold them until the slave accepts each one.
     task automatic send_ar;
         logic [31:0] prng;
         begin

@@ -61,6 +61,7 @@ module dma_axi64 #(
     logic [31:0] read_left, write_left;
     logic [BURST_W-1:0] read_beats, write_beats;
 
+    // Limit an AXI burst to capacity, remaining length, and the current 4 KiB page.
     function automatic logic [BURST_W-1:0] burst_beats(
         input logic [11:0] start, input logic [31:0] remaining
     );
@@ -77,10 +78,12 @@ module dma_axi64 #(
         end
     endfunction
 
+    // Select the low lanes that still hold bytes on this outgoing beat.
     function automatic logic [7:0] byte_enable(input logic [31:0] bytes);
         byte_enable = bytes >= 8 ? 8'hff : (8'd1 << bytes[2:0]) - 1'b1;
     endfunction
 
+    // Require alignment and a positive length whose rounded byte range cannot wrap.
     function automatic logic valid_command(input logic [63:0] address, input logic [31:0] bytes);
         logic [31:0] last_bus_offset;
         begin

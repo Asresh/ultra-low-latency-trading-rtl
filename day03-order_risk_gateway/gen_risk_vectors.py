@@ -86,6 +86,7 @@ def clinic(s: Scenario) -> None:
 
 
 def exhausted_handles(s: Scenario) -> None:
+    """Drive a slot and its event sequence to their limits to exercise rejection without reuse."""
     s.reset()
     s.configure(BUY, Policy(1, 1, 80, 80, 5000, 5))
     for generation in range(1, s.profile.last_generation + 1):
@@ -143,6 +144,7 @@ def arithmetic_limits(s: Scenario) -> None:
 
 
 def emergency_stop(s: Scenario) -> None:
+    """Demonstrate which operations remain available after halt and how reset restores admission."""
     s.reset()
     s.configure(BUY, Policy(1, 1, 60, 50, 700, 5))
     a = s.order(Op.NEW, BUY, 0, price=5, qty=5, expected=Code.OK)
@@ -157,6 +159,7 @@ def emergency_stop(s: Scenario) -> None:
 
 
 def key_space(s: Scenario) -> list[Key]:
+    """Enumerate all valid account, instrument, and side tuples for the current profile."""
     return [
         Key(account, instrument, side)
         for account in range(s.profile.accounts)
@@ -166,6 +169,7 @@ def key_space(s: Scenario) -> list[Key]:
 
 
 def random_policy(s: Scenario, rng: random.Random) -> Policy:
+    """Choose policy limits within the test profile's representable ranges."""
     lo = rng.randint(1, 7)
     hi = rng.randint(60, min(s.profile.max_price, 180))
     return Policy(
@@ -175,6 +179,7 @@ def random_policy(s: Scenario, rng: random.Random) -> Policy:
 
 
 def drive_live(s: Scenario, rng: random.Random, slot: int) -> None:
+    """Generate a lifecycle update for a live order, sometimes corrupting its identity or event."""
     target = s.model.orders[slot]
     op = rng.choices(
         (Op.FILL, Op.CANCEL, Op.REJECT, Op.AMEND, Op.SNAPSHOT, Op.NEW),
@@ -208,6 +213,7 @@ def drive_live(s: Scenario, rng: random.Random, slot: int) -> None:
 
 
 def drive_free(s: Scenario, rng: random.Random, slot: int, keys: list[Key]) -> None:
+    """Exercise new admissions and invalid requests against an unoccupied slot."""
     op = rng.choices((Op.NEW, Op.FILL, Op.SNAPSHOT, 6), weights=(78, 6, 13, 3))[0]
     key = rng.choice(keys)
     if op == Op.NEW:
@@ -223,6 +229,7 @@ def drive_free(s: Scenario, rng: random.Random, slot: int, keys: list[Key]) -> N
 
 
 def fuzz(s: Scenario, seed: int, count: int) -> None:
+    """Mix workload, configuration changes, and occasional controls from a fixed seed."""
     rng = random.Random(seed)
     keys = key_space(s)
     for i in range(count):
@@ -242,6 +249,7 @@ def fuzz(s: Scenario, seed: int, count: int) -> None:
 
 
 def report(s: Scenario) -> None:
+    """Print decision and operation coverage counts collected by the scenario."""
     print(f"{s.profile.name}: {len(s.stimulus)} actions, {len(s.expected)} replies")
     print("Ops:", " ".join(f"{kind.name.lower()}={count}" for kind, count in sorted(s.operations.items())))
     summaries = (f"{status.name.lower()}={amount}" for status, amount in sorted(s.codes.items()))
@@ -249,6 +257,7 @@ def report(s: Scenario) -> None:
 
 
 def check_coverage(codes: Counter[Code]) -> None:
+    """Require the generated workload to reach the intended status codes."""
     reachable = set(Code) - {Code.LEDGER_INVARIANT}
     uncovered = sorted(reachable - set(codes))
     if uncovered:
@@ -257,6 +266,7 @@ def check_coverage(codes: Counter[Code]) -> None:
 
 
 def main() -> None:
+    """Select test geometry and seed, then write matching stimulus and expected-reply files."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=PROFILES, required=True)
     parser.add_argument("--output", metavar="DIRECTORY", type=Path, required=True)

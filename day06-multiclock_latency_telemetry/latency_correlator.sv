@@ -56,6 +56,7 @@ module latency_correlator #(
     wire [63:0] stamp;
     assign {end_event, key, probe, stamp} = s_data;
 
+    // Map the key or absolute queue cursor into the appropriate table slot.
     function automatic logic [INDEX_W-1:0] index_of(input logic [KEY_W-1:0] full_key);
         logic [INDEX_W-1:0] index;
         begin
@@ -66,6 +67,7 @@ module latency_correlator #(
         end
     endfunction
 
+    // Compare tick distance against the timeout with wrap-aware unsigned arithmetic.
     function automatic logic too_old(
         input logic [63:0] arrival,
         input logic [63:0] present,

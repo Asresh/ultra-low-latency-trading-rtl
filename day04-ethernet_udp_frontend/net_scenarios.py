@@ -31,6 +31,7 @@ STATS_FROM_TX = {
 
 class Program:
     def __init__(self, seed, *, fixture_geometry=False, allow_zero=True):
+        """Initialize the Python reference policy and buffers for a host and RTL scenario."""
         self.rng = random.Random(seed)
         self.commands = []
         self.source_rx = []
@@ -49,45 +50,56 @@ class Program:
         self.cookie = 1234
 
     def step(self, op, *fields):
+        """Append a fixed-format simulator action with its padded payload fields."""
         fields += (0,) * (4-len(fields))
         assert len(fields) == 4
         self.commands.append(f"{op:d} " + " ".join(f"{x:080x}" for x in fields))
 
     def write_rule(self, index, rule):
+        """Write one packed rule into the inactive rule bank in model and stimulus."""
         self.rules[1-self.active][index] = rule
         self.step(WRITE, index, rule.encode())
 
     def commit(self):
+        """Swap the staged policy in both the model and the simulated device."""
         self.active = 1-self.active
         self.epoch = (self.epoch + 1) & 255
         self.step(COMMIT)
 
     def replace_rules(self, rules):
+        """Replace the entire policy before issuing its single commit."""
         for index in range(8):
             self.write_rule(index, rules[index] if index < len(rules) else Rule(enabled=False))
         self.commit()
 
     def flows(self, info=1, body=1, tx=1, status=1):
+        """Choose stall modes for the virtual data consumers."""
         self.step(FLOWS, info, body, tx, status)
 
     def wait(self, clocks):
+        """Add idle cycles to settle or drain the declared interfaces."""
         self.step(WAIT, clocks)
 
     def counters(self):
+        """Return the reference monitor used to check the requested statistics."""
         self.step(COUNTS, len(self.golden_info), len(self.golden_payload),
                   sum(map(len, self.golden_tx)), sum(map(len, self.golden_status)))
 
     def snapshot(self, index, expected=None):
+        """Capture a consistent counter bank view and append its hardware action."""
         self.step(STAT, index, self.stats[index] if expected is None else expected)
 
     def clear(self):
+        """Clear the selected counters without changing the packet policy."""
         self.step(CLEAR_STATS)
         self.stats.clear()
 
     def check_precision(self, rx_first_to_info, tx_desc_to_mac, max_tx_beat_gap, parallel):
+        """Record expected response-cycle bounds for the bench to check."""
         self.step(CHECK_PRECISION, rx_first_to_info, tx_desc_to_mac, max_tx_beat_gap, parallel)
 
     def rx_record(self, beats, *, expected_result=None):
+        """Record the expected disposition and payload for one received packet."""
         frame, axis = from_beats(beats)
         if axis == Result.OK:
             result = classify(parse_frame(frame, max_frame=self.max_frame, allow_zero=self.allow_zero),
@@ -115,6 +127,7 @@ class Program:
         return result
 
     def tx_record(self, lane, case):
+        """Encode a descriptor and its expected Ethernet result as vector records."""
         descriptor, payload_beats = case
         result, expected = descriptor.expected(payload_beats, max_payload=self.max_payload)
         self.source_tx[lane].append(case)
@@ -130,6 +143,7 @@ class Program:
             self.stats[STATS_FROM_TX[result]] += 1
 
     def burst(self, rx=(), tx_a=(), tx_b=(), perturb=0):
+        """Schedule a complete group of receive and transmit traffic for the simulator."""
         rx_beats = []
         for frame in rx:
             rx_beats.extend(frame)
@@ -140,6 +154,7 @@ class Program:
         self.step(BURST, len(rx_beats), len(tx_a), len(tx_b), perturb)
 
     def rx_burst(self, *frames, perturb=0):
+        """Schedule a receive-only burst using the supplied packet records."""
         converted = []
         for item in frames:
             if isinstance(item, bytes):
@@ -151,16 +166,19 @@ class Program:
         self.burst(converted, perturb=perturb)
 
     def desc(self, packet, **arguments):
+        """Create a transmit descriptor for a payload and the selected header parameters."""
         self.cookie += 1
         return TxDescriptor(packet, self.cookie, **arguments)
 
     def tx_case(self, packet, *, beats=None, **arguments):
+        """Build one transmit case and register its expected acceptance or failure."""
         descriptor = self.desc(packet, **arguments)
         if beats is None:
             beats = to_beats(packet.payload, rng=self.rng) if packet.payload else []
         return descriptor, beats
 
     def write(self, directory):
+        """Export scenario actions and all receive and transmit scoreboards."""
         directory.mkdir(exist_ok=True, parents=True)
         (directory/"commands.txt").write_text("\n".join(self.commands)+"\n")
         (directory/"rx_input.txt").write_text("\n".join(x.row() for x in self.source_rx)+"\n")
@@ -182,14 +200,17 @@ class Program:
 
 
 def standard(payload=b"", **kwargs):
+    """Build the default directed scenario using the chosen random seed."""
     return replace(Packet(DST_MAC, SRC_MAC, SRC, DST, 12000, 18000, payload), **kwargs)
 
 
 def mutate(data, offset, value):
+    """Produce a modified packet or beat sequence for a specific framing check."""
     return data[:offset] + bytes((value,)) + data[offset+1:]
 
 
 def precision_baseline(program):
+    """Check exact first-response latency under an unstalled schedule."""
     program.flows()
     program.write_rule(3, Rule(queue=2))
     program.commit()
@@ -204,6 +225,7 @@ def precision_baseline(program):
 
 
 def classify_during_stall(program):
+    """Change rules while a completed receive result waits behind backpressure."""
     program.replace_rules([
         Rule(dst_port=Match(18000, 0xffff), queue=3),
         Rule(dst_ip=Match(DST, 0xffffffff), src_ip=Match(SRC, 0xffffff00),
@@ -232,6 +254,7 @@ def classify_during_stall(program):
 
 
 def framing_errors(program):
+    """Exercise malformed keep masks and packet boundary sidebands."""
     packet = standard(b"abcdefghi")
     frame = packet.serialize(include_pad=False)
     start = 14
@@ -284,6 +307,7 @@ def framing_errors(program):
 
 
 def tx_errors_and_boundaries(program):
+    """Cover transmit validation and edge cases around its declared length."""
     packet = standard(bytes(range(17)))
     bad_shape = to_beats(packet.payload)
     bad_shape[1] = replace(bad_shape[1], first=True)
@@ -317,6 +341,7 @@ def tx_errors_and_boundaries(program):
 
 
 def random_packet(program, *, for_receive):
+    """Choose reproducible layer-two, IPv4, and UDP fields."""
     r = program.rng
     max_length = min(160, program.max_payload)
     payload = bytes(r.randrange(256) for _ in range(r.randrange(max_length+1)))
@@ -331,6 +356,7 @@ def random_packet(program, *, for_receive):
 
 
 def random_bursts(program, count):
+    """Mix varied packet types, queue selection, and stall schedules."""
     program.replace_rules([Rule(queue=6)])
     for _ in range(count):
         packets = [random_packet(program, for_receive=True) for _ in range(4)]
@@ -350,6 +376,7 @@ def random_bursts(program, count):
 
 
 def default_exact_bounds(program):
+    """Check lengths immediately below, at, and above default buffer limits."""
     program.replace_rules([Rule(queue=7)])
     program.flows(info=2, body=2, tx=2, status=2)
 
@@ -392,6 +419,7 @@ def default_exact_bounds(program):
 
 
 def injected_cross_layer_faults(program, count):
+    """Inject modeled faults across Ethernet, IPv4, and UDP parsing stages."""
     cases = list(fault_sample(program.rng,
                              lambda: random_packet(program, for_receive=True),
                              count, program.max_frame))
@@ -406,6 +434,7 @@ def injected_cross_layer_faults(program, count):
 
 
 def check_statistics(program):
+    """Compare model statistics with the hardware expectation tape."""
     for index in (0,1,2,3,5,6,7,8,9,10,11,12,15,16,17,18,20,21,22,23):
         program.snapshot(index)
     program.clear()
@@ -414,6 +443,7 @@ def check_statistics(program):
 
 
 def main():
+    """Parse geometry and seed and write a reproducible frontend scenario."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--directory", type=Path, required=True)
     ap.add_argument("--seed", type=int, default=4101)

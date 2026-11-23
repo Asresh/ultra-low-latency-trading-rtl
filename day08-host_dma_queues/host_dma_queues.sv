@@ -154,10 +154,12 @@ module host_dma_queues #(
     wire [31:0] digest;
     wire checksum_ok = !flags[1] || digest == expected_crc;
 
+    // Return a contiguous low-lane mask for up to one data beat.
     function automatic logic [7:0] keep_for(input logic [31:0] count);
         keep_for = count >= 8 ? 8'hff : (8'd1 << count[2:0]) - 1'b1;
     endfunction
 
+    // Add the byte count to a 64-bit total, saturating on overflow.
     function automatic logic [63:0] add_bytes(
         input logic [63:0] a,
         input logic [31:0] b
@@ -169,6 +171,7 @@ module host_dma_queues #(
         end
     endfunction
 
+    // Copy valid byte lanes and zero every lane outside the keep mask.
     function automatic logic [63:0] mask_invalid(
         input logic [63:0] source,
         input logic [7:0] keep
@@ -277,6 +280,7 @@ module host_dma_queues #(
             packet_memory[data_word] <= mask_invalid(s_packet_data, s_packet_keep);
     end
 
+    // Stage completion status, byte count and CRC before starting the CQ write.
     task automatic finish(input logic [7:0] status, input logic [31:0] count, input logic [31:0] crc);
         begin
             completion_status <= status;

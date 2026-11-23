@@ -23,6 +23,7 @@ class Trace:
 
     @classmethod
     def parse(cls, row: str, cfg: Config) -> "Trace":
+        """Decode one simulator row into drive and observed output records."""
         try:
             word = [int(value) for value in row.split()]
         except ValueError as exc:
@@ -53,16 +54,19 @@ class Trace:
 
 
 def unpack_mask(value: int, width: int) -> Tuple[bool, ...]:
+    """Expand packed lane bits in increasing index order."""
     return tuple(bool((value >> bit) & 1) for bit in range(width))
 
 
 def records(path: Path, cfg: Config) -> Iterable[Trace]:
+    """Read hardware trace records from the simulator's capture."""
     with path.open(encoding="utf-8") as data:
         for row in data:
             yield Trace.parse(row, cfg)
 
 
 def percentiles(samples: List[int]) -> Dict[str, int]:
+    """Report selected integer latency percentiles from collected observations."""
     if not samples:
         return {}
     samples = sorted(samples)
@@ -77,6 +81,7 @@ def percentiles(samples: List[int]) -> Dict[str, int]:
 
 
 def print_differences(got: Combinational, wanted: Combinational) -> str:
+    """Identify mismatched pins between model and simulator output bundles."""
     differences = []
     for field in fields(got):
         actual = getattr(got, field.name)
@@ -96,6 +101,7 @@ def print_differences(got: Combinational, wanted: Combinational) -> str:
 
 class Checker:
     def __init__(self, cfg: Config, scenario: Scenario):
+        """Construct an independent expected engine and counters for the named scenario."""
         self.cfg = cfg
         self.scenario = scenario
         self.oracle = Engine(cfg)
@@ -127,13 +133,16 @@ class Checker:
         self.per_bank: List[Counter] = [Counter() for _ in range(cfg.banks)]
 
     def error(self, message: str) -> AssertionError:
+        """Create a verification failure with scenario and current cycle context."""
         return AssertionError(f"{self.scenario.name} cycle {self.cycle}: {message}")
 
     def require(self, value: bool, message: str) -> None:
+        """Raise a contextual verification error when a runtime property is false."""
         if not value:
             raise self.error(message)
 
     def check_stimulus(self, trace: Trace) -> None:
+        """Check that the trace's actual input pins agree with the requested stimulus."""
         stimulus = trace.stimulus
         knobs = (
             self.scenario.schedule[self.cycle]
@@ -157,6 +166,7 @@ class Checker:
             )
 
     def observe_reset(self) -> None:
+        """Discard the in-flight comparisons cancelled by a reset edge."""
         self.metrics["reset_cycles"] += 1
         if not self.reset_last:
             self.metrics["reset_episodes"] += 1
@@ -173,6 +183,7 @@ class Checker:
         self.scheduled_at = None
 
     def observe_policy_changes(self) -> None:
+        """Track applicability and desired quote changes across model cycles."""
         for bank, instrument in enumerate(self.oracle.instruments):
             mode = instrument.mode
             desired = instrument.desired()
@@ -197,6 +208,7 @@ class Checker:
             self.unpublished_key[bank] = pending
 
     def observe_source(self, trace: Trace) -> None:
+        """Remember the current accepted command and whether the source must hold it."""
         command = trace.stimulus.command
         if command is None:
             self.held_command = None
@@ -221,6 +233,7 @@ class Checker:
                 self.metrics["fence_restarts"] += 1
 
     def observe_response(self, trace: Trace) -> None:
+        """Compare a hardware diagnostic to the queued expected command response."""
         response = trace.observed.response
         if self.held_response is not None:
             self.require(response == self.held_response, "diagnostic changed under stall")
@@ -263,6 +276,7 @@ class Checker:
                 self.metrics["observed_timeouts"] += response.statistic
 
     def observe_quote(self, trace: Trace) -> None:
+        """Check each quote transfer and applicability flag against the independent policy state."""
         quote = trace.observed.quote
         if self.held_quote is not None:
             self.require(quote == self.held_quote, "quote changed under stall")
@@ -299,6 +313,7 @@ class Checker:
             self.require(not (quote.bid or quote.ask or quote.size), "withdrawal carries executable price/size")
 
     def check_cycle(self, trace: Trace) -> None:
+        """Compare every hardware pin after reconstructing the expected model cycle."""
         self.require(trace.cycle == self.cycle + 1, "nonconsecutive trace cycle")
         self.cycle = trace.cycle
         self.check_stimulus(trace)
@@ -321,6 +336,7 @@ class Checker:
         self.reset_last = trace.stimulus.reset
 
     def coverage(self) -> None:
+        """Require the scenario's named command, fault, and stall cases to occur."""
         need = self.scenario.coverage
         routes = {
             "all_ops": all(self.ops[op.name] for op in Operation),
@@ -355,6 +371,7 @@ class Checker:
             raise self.error(f"missing required coverage: {', '.join(bad_coverage)}")
 
     def finish(self) -> Dict:
+        """Check end-of-run queue state and report counts and latency observations."""
         self.require(self.accepted == len(self.scenario.commands), "simulation did not accept every command")
         self.require(not self.pending_responses, "simulation ended with unobserved responses")
         self.require(self.oracle.publisher.output is None, "publisher did not drain")
@@ -382,6 +399,7 @@ class Checker:
 
 
 def operation_name(op: int) -> str:
+    """Resolve a known operation or preserve the value of an unknown opcode."""
     try:
         return Operation(op).name
     except ValueError:
@@ -389,6 +407,7 @@ def operation_name(op: int) -> str:
 
 
 def verify(cfg: Config, scenario: Scenario, args: argparse.Namespace) -> Dict:
+    """Generate a single scenario, run RTL, and compare its written trace."""
     base = args.build / scenario.name
     base.mkdir(parents=True, exist_ok=True)
     cmd = base / "commands.txt"
@@ -407,6 +426,7 @@ def verify(cfg: Config, scenario: Scenario, args: argparse.Namespace) -> Dict:
 
 
 def report(data: Dict) -> str:
+    """Render a scenario result in a form suitable for a reproducible test log."""
     lines = [
         f"# Day 05 verification profile {data['profile']}",
         "",
@@ -427,6 +447,7 @@ def report(data: Dict) -> str:
 
 
 def run_verification(args: argparse.Namespace) -> None:
+    """Run all selected campaigns and save their verified aggregate report."""
     if not 100 <= args.iterations <= 30000:
         raise SystemExit("--iterations must be between 100 and 30000")
     cfg = PROFILES[args.profile]
@@ -448,6 +469,7 @@ def run_verification(args: argparse.Namespace) -> None:
 
 
 def arguments() -> argparse.Namespace:
+    """Read profile, seed, simulator, and campaign options."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     run_cmd = sub.add_parser("run", help="generate, simulate, check and report")
@@ -466,6 +488,7 @@ def arguments() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Dispatch the verifier or geometry output command."""
     args = arguments()
     if args.action == "run":
         run_verification(args)

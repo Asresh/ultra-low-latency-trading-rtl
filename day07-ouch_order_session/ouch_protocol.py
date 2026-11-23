@@ -60,6 +60,7 @@ class DecodeError(ValueError):
     """Carry a stable hardware-compatible error category and a host diagnostic."""
 
     def __init__(self, status: Status, message: str, offset: int | None = None):
+        """Attach the protocol status and applicable byte offset to a decoding error."""
         self.status = status
         self.offset = offset
         location = f" at byte {offset}" if offset is not None else ""
@@ -73,9 +74,11 @@ class Envelope:
 
     @property
     def length(self) -> int:
+        """Return the number of bytes in the envelope body, including its type byte."""
         return 1 + len(self.payload)
 
     def frame(self) -> bytes:
+        """Add the two-byte wire length prefix and the packet type."""
         if len(self.kind) != 1 or ord(self.kind) >= 128:
             raise ValueError("Soup packet type must be one ASCII byte")
         if not 1 <= self.length <= MAX_BODY:
@@ -86,6 +89,7 @@ class Envelope:
 class StreamDecodeError(DecodeError):
     def __init__(self, status: Status, message: str, offset: int,
                  completed: list[tuple[int, Envelope]]):
+        """Retain valid frames preceding the decoding fault and its offset."""
         super().__init__(status, message, offset)
         self.completed = completed
 
@@ -99,6 +103,7 @@ class Login:
     timeout: bytes = b"05000"
 
     def validate(self) -> None:
+        """Check the record for inconsistent fields before it can be encoded or consumed."""
         if not credential_valid(self.username, 6):
             raise DecodeError(Status.LOGIN_TEXT, "username must be a 6-byte alphanumeric login field")
         if not credential_valid(self.password, 10):
@@ -111,6 +116,7 @@ class Login:
             raise DecodeError(Status.LOGIN_TEXT, "sequence is outside unsigned 64-bit range")
 
     def encode(self) -> bytes:
+        """Serialize the validated protocol record into its exact wire layout."""
         self.validate()
         return Envelope("L", self.username + self.password + self.session +
                         print_decimal(self.sequence) + self.timeout).frame()
@@ -130,6 +136,7 @@ class ClientOrder:
     client_id: bytes = b""
 
     def encode(self) -> bytes:
+        """Serialize the validated protocol record into its exact wire layout."""
         if self.kind == "O":
             sub = ENTER.pack(
                 b"O", self.ref, self.side.encode("ascii"), self.quantity, self.symbol,
@@ -194,6 +201,7 @@ class VenueEvent:
         return data + b"\0\0" if self.explicit_zero_appendage else data
 
     def frame(self) -> bytes:
+        """Encode a sequenced venue message and its SoupBinTCP envelope."""
         return Envelope("S", self.payload()).frame()
 
 
@@ -210,12 +218,14 @@ CANCEL_STATUS = struct.Struct(">cQI")
 
 
 def print_decimal(value: int) -> bytes:
+    """Format a sequence integer in the fixed-width SoupBinTCP ASCII field."""
     if not 0 <= value <= MAX_SEQUENCE:
         raise ValueError("number is outside unsigned 64-bit range")
     return f"{value:20d}".encode("ascii")
 
 
 def parse_decimal(raw: bytes) -> int:
+    """Parse a padded ASCII decimal sequence and reject overflow."""
     digits = raw.lstrip(b" ")
     if len(raw) != 20 or not digits or not digits.isdigit():
         raise DecodeError(Status.LOGIN_TEXT, "invalid right-aligned ASCII sequence")
@@ -226,16 +236,19 @@ def parse_decimal(raw: bytes) -> int:
 
 
 def ascii_alnum(raw: bytes) -> bool:
+    """Return whether every byte belongs to the ASCII letter or digit set."""
     return bool(raw) and all(
         48 <= c <= 57 or 65 <= c <= 90 or 97 <= c <= 122 for c in raw
     )
 
 
 def credential_valid(raw: bytes, length: int) -> bool:
+    """Validate the width, character set and trailing padding of a credential."""
     return len(raw) == length and ascii_alnum(raw.rstrip(b" "))
 
 
 def valid_session(raw: bytes, allow_blank: bool = False) -> bool:
+    """Check the session identifier with the caller's optional blank allowance."""
     if len(raw) != 10:
         return False
     significant = raw.lstrip(b" ")
@@ -243,6 +256,7 @@ def valid_session(raw: bytes, allow_blank: bool = False) -> bool:
 
 
 def valid_symbol(raw: bytes) -> bool:
+    """Check a fixed-width symbol before accepting order entry."""
     significant = raw.rstrip(b" ")
     return len(raw) == 8 and bool(significant) and all(
         48 <= c <= 57 or 65 <= c <= 90 or c == 46 for c in significant
@@ -250,10 +264,12 @@ def valid_symbol(raw: bytes) -> bool:
 
 
 def valid_client(raw: bytes) -> bool:
+    """Check a fixed-width client identifier and its padding."""
     return len(raw) == 14 and ascii_alnum(raw.replace(b" ", b""))
 
 
 def decode_login_request(raw: bytes) -> Login:
+    """Decode exact login request fields and reject invalid lengths."""
     if len(raw) != 51:
         raise DecodeError(Status.FRAME_LENGTH, "login request requires 51 payload bytes")
     user, secret, session, sequence, timeout = struct.unpack(">6s10s10s20s5s", raw)
@@ -263,6 +279,7 @@ def decode_login_request(raw: bytes) -> Login:
 
 
 def login_accepted(session: bytes, sequence: int | bytes) -> bytes:
+    """Build a venue login-accepted envelope for a session and sequence."""
     if len(session) != 10:
         raise ValueError("login accepted requires a 10-byte session ID")
     digits = sequence if isinstance(sequence, bytes) else print_decimal(sequence)
@@ -272,10 +289,12 @@ def login_accepted(session: bytes, sequence: int | bytes) -> bytes:
 
 
 def control(kind: str, reason: bytes = b"") -> bytes:
+    """Construct a wire control message with an optional reason byte."""
     return Envelope(kind, reason).frame()
 
 
 def _check_appendage(raw: bytes, fixed: int, optional: bool = False) -> bytes:
+    """Require the mandatory message fields and a supported appendage length."""
     if optional and len(raw) == fixed:
         return raw
     if len(raw) != fixed + 2:
@@ -286,6 +305,7 @@ def _check_appendage(raw: bytes, fixed: int, optional: bool = False) -> bytes:
 
 
 def decode_outbound(payload: bytes) -> ClientOrder:
+    """Decode an outbound order body into typed fields."""
     if not payload:
         raise DecodeError(Status.OUCH_LENGTH, "empty client data payload")
     kind = payload[:1]
@@ -311,6 +331,7 @@ def decode_outbound(payload: bytes) -> ClientOrder:
 
 
 def _acknowledgment(payload: bytes, replacement: bool) -> VenueEvent:
+    """Decode both initial and replacement acknowledgment layouts."""
     schema = REPLACED if replacement else ACCEPTED
     fields = schema.unpack(_check_appendage(payload, schema.size))
     kind = fields[0].decode("ascii")
@@ -327,6 +348,7 @@ def _acknowledgment(payload: bytes, replacement: bool) -> VenueEvent:
 
 
 def decode_venue(payload: bytes) -> VenueEvent:
+    """Decode a sequenced venue payload using its type and exact field widths."""
     if not payload:
         raise DecodeError(Status.OUCH_LENGTH, "empty sequenced data payload")
     kind = payload[:1]
@@ -361,6 +383,7 @@ def decode_venue(payload: bytes) -> VenueEvent:
 
 
 def decode_peer(envelope: Envelope) -> tuple[str, VenueEvent | bytes | None]:
+    """Interpret a framed message received from the venue endpoint."""
     kind = envelope.kind
     payload = envelope.payload
     if kind == "S":
@@ -379,6 +402,7 @@ def decode_peer(envelope: Envelope) -> tuple[str, VenueEvent | bytes | None]:
 
 
 def decode_client(envelope: Envelope) -> tuple[str, ClientOrder | Login | None]:
+    """Interpret a framed message sent by the client endpoint."""
     kind = envelope.kind
     if kind == "U":
         return kind, decode_outbound(envelope.payload)
@@ -395,6 +419,7 @@ class SoupStream:
     """Incrementally split a direction of a byte capture; offsets survive fragmentation."""
 
     def __init__(self, limit: int = MAX_BODY):
+        """Create an empty receive buffer with a maximum permitted packet length."""
         if not 1 <= limit <= 65535:
             raise ValueError("Soup frame limit must fit its two byte prefix")
         self.limit = limit
@@ -403,6 +428,7 @@ class SoupStream:
         self.stopped = False
 
     def ingest(self, fragment: bytes) -> list[tuple[int, Envelope]]:
+        """Append a byte fragment and yield all newly complete valid frames."""
         if self.stopped:
             raise RuntimeError("malformed stream is closed")
         self.partial.extend(fragment)
@@ -429,11 +455,13 @@ class SoupStream:
         return completed
 
     def finish(self) -> None:
+        """Verify the stream has no truncated envelope remaining at EOF."""
         if self.partial:
             raise DecodeError(Status.FRAME_LENGTH, "truncated frame at EOF", self.offset)
 
 
 def take_frames(stream: BinaryIO, chunk_size: int = 4096) -> Iterator[tuple[int, Envelope]]:
+    """Feed binary chunks to the framer and return all complete envelopes."""
     if chunk_size < 1:
         raise ValueError("chunk size must be positive")
     parser = SoupStream()
@@ -447,6 +475,7 @@ def take_frames(stream: BinaryIO, chunk_size: int = 4096) -> Iterator[tuple[int,
 
 
 def unframe(frame: bytes) -> Envelope:
+    """Decode exactly one complete frame and reject trailing bytes."""
     items = list(take_frames(io.BytesIO(frame)))
     if len(items) != 1:
         raise DecodeError(Status.FRAME_LENGTH, f"expected one complete frame, got {len(items)}")
@@ -454,4 +483,5 @@ def unframe(frame: bytes) -> Envelope:
 
 
 def multiplex(frames: Iterable[Envelope]) -> bytes:
+    """Concatenate framed messages into one byte stream in order."""
     return b"".join(frame.frame() for frame in frames)

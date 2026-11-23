@@ -21,6 +21,7 @@ module tb_eth_packet_arbiter;
     logic [32:0] old_output;
     logic [31:0] random_state = 32'h47f51abc;
 
+    // Step the fixed-seed pseudo-random generator used for repeatable test patterns.
     function automatic logic [31:0] random_next(input logic [31:0] value);
         logic [31:0] x;
         begin
@@ -30,10 +31,12 @@ module tb_eth_packet_arbiter;
         end
     endfunction
 
+    // Choose a reproducible payload length from lane and packet index.
     function automatic integer packet_length(input integer lane, input integer index);
         packet_length = 1 + ((17 * index + 7 * lane + phase) % 13);
     endfunction
 
+    // Encode lane, packet, and beat position in the expected payload word.
     function automatic logic [31:0] word_value(input integer lane, input integer index,
                                                input integer offset);
         word_value = {8'(phase),8'(lane),8'(index),8'(offset)};
@@ -120,6 +123,7 @@ module tb_eth_packet_arbiter;
         end
     end
 
+    // Run a packet arbitration phase to completion under its selected load mix.
     task automatic run_phase(input integer which, input integer high_count, input integer low_count);
         begin
             @(negedge clk);

@@ -68,11 +68,13 @@ class Stimulus:
     payload: int = 0
 
     def line(self) -> str:
+        """Encode this stimulus as one text row consumed by the simulation driver."""
         return f"{int(self.action)} {self.arg_a} {self.arg_b} {self.payload:x}"
 
 
 class Scenario:
     def __init__(self, slots: int):
+        """Initialize the session oracle, board state and reproducible output trails."""
         self.device = Session(slots=slots)
         self.actions: list[Stimulus] = []
         self.notices: list[Notice] = []
@@ -86,34 +88,41 @@ class Scenario:
         self.hwm = 0
 
     def _action(self, action: Act, a: int = 0, b: int = 0, payload: int = 0) -> None:
+        """Append one typed control or data stimulus to the simulation sequence."""
         self.actions.append(Stimulus(action, a, b, payload))
 
     def _check(self, reply: Notice | None, expected: Status | None = None) -> None:
+        """Store a generated reply and verify any case-specific expected status."""
         if reply is not None:
             self.notices.append(reply)
         if expected is not None and (reply is None or reply.status != expected):
             raise AssertionError(f"expected {expected.name}, observed {reply}")
 
     def _tx(self, frame: bytes) -> None:
+        """Queue one expected transmission for byte-exact comparison."""
         if frame:
             self.packets.append(frame)
 
     def barrier(self, slot: int = 0) -> None:
+        """Record the current expected state before any later events are applied."""
         width = sum(SNAPSHOT_WIDTHS)
         self._action(Act.BARRIER, len(self.packets), len(self.notices),
                      (slot << width) | self.device.snapshot(slot))
 
     def reset(self) -> None:
+        """Clear volatile state to the documented power-on defaults."""
         self._action(Act.RESET)
         self.device.reset()
         self.history.clear()
         self.hwm = 0
 
     def link(self, up: bool) -> None:
+        """Change connection state at an explicit transport boundary."""
         self._action(Act.LINK, int(up))
         self.device.link(up)
 
     def reconnect(self, begin: int | None = None, ack: int | None = None) -> None:
+        """Model transport loss, reconnection, login and the requested replay cursor."""
         self.barrier()
         self.link(False)
         self.link(True)
@@ -126,6 +135,7 @@ class Scenario:
         self.barrier()
 
     def login(self, request: Login = DEFAULT_LOGIN, expected: Status | None = None) -> None:
+        """Drive a login request and verify its response against the model."""
         self._action(Act.LOGIN, payload=pack_login(request))
         notice, sent = self.device.request_login(request)
         self._check(notice, expected)
@@ -137,6 +147,7 @@ class Scenario:
         tif: str = "", display: str = "", client_id: bytes = b"",
         expected: Status | None = None,
     ) -> Notice:
+        """Submit an order command and record its modeled response and wire output."""
         cmd = Command(
             kind, slot, next(self.next_tag), ref, prev, qty,
             price, symbol, side, tif, display, client_id,
@@ -149,9 +160,11 @@ class Scenario:
 
     @staticmethod
     def ident(ref: int) -> bytes:
+        """Derive a deterministic client identifier from the order reference."""
         return f"J{ref:012X} ".encode("ascii")
 
     def allocate_ref(self) -> int:
+        """Return the next unused order reference for a generated command."""
         self.hwm = max(self.hwm, self.device.store.high_water) + 1
         return self.hwm
 
@@ -160,6 +173,7 @@ class Scenario:
         ref: int | None = None, symbol: bytes = SYMBOLS[0], tif: str = "0",
         display: str = "Y", expected: Status = Status.OK,
     ) -> int:
+        """Construct and drive a new-order request with the specified fixture fields."""
         if ref is None:
             ref = self.allocate_ref()
         if not self.hwm or ref > self.hwm:
@@ -172,6 +186,7 @@ class Scenario:
         self, slot: int, qty: int, price: int, ref: int | None = None,
         prev: int | None = None, expected: Status = Status.OK,
     ) -> int:
+        """Construct and drive a replace request keyed by old and new references."""
         if ref is None:
             ref = self.allocate_ref()
         if prev is None:
@@ -184,6 +199,7 @@ class Scenario:
         self, *frames: bytes, max_keep: int = 8, expected: Status | None = None,
         remember: bool = True,
     ) -> None:
+        """Send received data through the same protocol parser exercised by the simulator."""
         raw = b"".join(frames)
         if not 0 < len(raw) <= MAX_FRAGMENT:
             raise ValueError(f"unsupported RX vector group: {len(raw)} bytes")
@@ -200,11 +216,13 @@ class Scenario:
         self.barrier()
 
     def partial(self, fragment: bytes) -> None:
+        """Record a fragment without falsely treating it as a complete packet."""
         if not fragment or len(fragment) > MAX_FRAGMENT:
             raise ValueError("fragment length is invalid")
         self._action(Act.BYTES, len(fragment), 4, int.from_bytes(fragment, "little"))
 
     def malformed_framing(self, raw: bytes, status: Status, keep: int | None = None) -> None:
+        """Supply an invalid frame or keep mask and check the parser fault."""
         if keep is None:
             self._action(Act.BYTES, len(raw), 8, int.from_bytes(raw, "little"))
         else:
@@ -212,16 +230,19 @@ class Scenario:
         self._check(self.device.parser_fault(status), status)
 
     def tick(self, count: int) -> None:
+        """Advance one timebase edge or the requested number of synthetic ticks."""
         self._action(Act.TICK, count)
         self._expect_ticks(count)
 
     def _expect_ticks(self, count: int) -> None:
+        """Advance the model timer and queue any resulting notices or keepalives."""
         for _ in range(count):
             notice, packet = self.device.tick()
             self._check(notice)
             self._tx(packet)
 
     def query_during_heartbeat(self) -> None:
+        """Schedule a query while a heartbeat is due on the wire."""
         command = Command(Cmd.QUERY, 0, next(self.next_tag))
         self._action(Act.QUERY_HEARTBEAT, self.device.tx_ticks, payload=command.pack())
         self._check(self.device.command(command)[0], Status.OK)
@@ -230,17 +251,21 @@ class Scenario:
         self.barrier()
 
     def kill(self) -> None:
+        """Apply the session's one-shot kill behavior."""
         self.device.kill()
         self._action(Act.KILL)
 
     def logout(self) -> None:
+        """Request orderly logout and record the expected control response."""
         self._action(Act.LOGOUT)
         self._tx(self.device.logout())
 
     def hold_tx_after(self, beats: int) -> None:
+        """Apply egress backpressure after a selected number of transferred beats."""
         self._action(Act.TX_LIMIT, beats)
 
     def cut_tcp_while_transmitting(self, prefix_bytes: int) -> None:
+        """Disconnect after exactly the specified prefix of a wire frame."""
         frame = self.packets.pop()
         if not 0 < prefix_bytes < len(frame) or prefix_bytes % 8:
             raise ValueError("partial TCP test must end at a nonterminal beat")
@@ -253,9 +278,11 @@ class Scenario:
         self.rx(login_accepted(SESSION, self.device.checkpoint))
 
     def system(self, value: str = "S", expected: Status = Status.OK) -> None:
+        """Drive an exchange system event and compare its resulting state."""
         self.rx(VenueEvent("S", next(self.clock), reason=ord(value)).frame(), expected=expected)
 
     def up(self) -> None:
+        """Set the transport link active in the scenario."""
         self.reset()
         self.link(True)
         self.login()
@@ -267,6 +294,7 @@ class Scenario:
         self, slot: int, *, quantity: int | None = None, price: int | None = None,
         state: str = "L", symbol: bytes | None = None, expected: Status = Status.OK,
     ) -> None:
+        """Acknowledge the selected outstanding command with its current reference."""
         order = self.device.store.view(slot)
         cmd = order.outstanding
         if cmd is None or cmd.kind not in (Cmd.ENTER, Cmd.REPLACE):
@@ -282,6 +310,7 @@ class Scenario:
         ).frame(), expected=expected)
 
     def venue_reject(self, slot: int, *, explicit: bool = False) -> None:
+        """Drive a reject for the selected slot and expected reference."""
         cmd = self.device.store.view(slot).outstanding
         if cmd is None:
             raise ValueError("no command pending")
@@ -291,6 +320,7 @@ class Scenario:
 
     def exec(self, slot: int, qty: int, px: int, match: int | None = None,
              expected: Status = Status.OK) -> None:
+        """Generate an execution report for the current order and requested price and size."""
         if match is None:
             match = next(self.match_id)
         order = self.device.store.view(slot)
@@ -299,17 +329,20 @@ class Scenario:
 
     def event_cancel(self, slot: int, qty: int, explicit: bool = False,
                      expected: Status = Status.OK) -> None:
+        """Drive a venue cancellation with optional explicit reference checking."""
         order = self.device.store.view(slot)
         self.rx(VenueEvent("C", next(self.clock), order.ref, quantity=qty,
                            reason=ord("U"), explicit_zero_appendage=explicit).frame(), expected=expected)
 
     def status(self, slot: int, kind: str, explicit: bool = False,
                expected: Status = Status.OK) -> None:
+        """Drive an order-status report and verify the expected session notice."""
         order = self.device.store.view(slot)
         self.rx(VenueEvent(kind, next(self.clock), order.ref,
                            explicit_zero_appendage=explicit).frame(), expected=expected)
 
     def write(self, out: Path) -> None:
+        """Write the stimulus and expected notices, frames, and checkpoints to output files."""
         out.mkdir(parents=True, exist_ok=True)
         with (out / "stimulus.txt").open("w", encoding="ascii") as stream:
             for command in self.actions:
@@ -326,6 +359,7 @@ class Scenario:
 
 
 def directed_lifecycle(s: Scenario) -> None:
+    """Exercise enter, replace, cancel, execution and terminal transitions in sequence."""
     s.reset()
     s.cmd(Cmd.QUERY, 0, expected=Status.OK)
     s.cmd(Cmd.ENTER, 0, expected=Status.NOT_ACTIVE)
@@ -398,6 +432,7 @@ def directed_lifecycle(s: Scenario) -> None:
 
 
 def replay_and_stops(s: Scenario) -> None:
+    """Exercise replay, sequence gaps and deliberate session termination."""
     s.up()
     first = s.enter(0, qty=18)
     s.ack(0)
@@ -432,6 +467,7 @@ def replay_and_stops(s: Scenario) -> None:
 
 
 def reference_and_market_boundaries(s: Scenario) -> None:
+    """Exercise reference reuse and market-eligibility boundary conditions."""
     s.up()
     threshold = (1 << 32) - 1
     slot0 = s.enter(0, ref=threshold - 2, qty=15)
@@ -459,6 +495,7 @@ def reference_and_market_boundaries(s: Scenario) -> None:
 
 
 def protocol_faults(s: Scenario) -> None:
+    """Drive invalid packet inputs and verify the decoded fault reason."""
     for malformed, code in (
         (b"\x00\x00", Status.FRAME_LENGTH),
         (b"\x00\x49", Status.FRAME_LENGTH),
@@ -492,6 +529,7 @@ def protocol_faults(s: Scenario) -> None:
 
 
 def socket_tx_boundary(s: Scenario) -> None:
+    """Cut a partially transmitted frame and check the transport state boundary."""
     s.up()
     s.hold_tx_after(1)
     first = s.enter(0, qty=69, price=678_900, symbol=SYMBOLS[1])
@@ -515,6 +553,7 @@ def socket_tx_boundary(s: Scenario) -> None:
 
 
 def ledger_faults(s: Scenario) -> None:
+    """Drive invalid order updates and check that the ledger remains consistent."""
     s.up()
     s.rx(VenueEvent("C", next(s.clock), 99, quantity=1).frame(), expected=Status.UNKNOWN_REFERENCE)
     s.barrier()
@@ -540,6 +579,7 @@ def ledger_faults(s: Scenario) -> None:
 
 
 def login_faults_and_ticks(s: Scenario) -> None:
+    """Exercise malformed login outcomes and heartbeat tick limits."""
     for response, code in (
         (login_accepted(SESSION, 2), Status.SEQUENCE_GAP),
         (login_accepted(SESSION, 0), Status.LOGIN_TEXT),
@@ -585,6 +625,7 @@ def login_faults_and_ticks(s: Scenario) -> None:
 
 
 def random_entry(s: Scenario, rng: random.Random, slot: int) -> None:
+    """Generate one reproducible new-order attempt for the chosen slot."""
     qty = rng.randint(25, 10_000)
     price = rng.randint(10_000, 990_000_000)
     side = rng.choice(("B", "S"))
@@ -593,6 +634,7 @@ def random_entry(s: Scenario, rng: random.Random, slot: int) -> None:
 
 
 def random_live(s: Scenario, rng: random.Random, slot: int) -> None:
+    """Choose an operation against a live order with reproducible fields."""
     order = s.device.store.view(slot)
     move = rng.randrange(100)
     if move < 37:
@@ -614,6 +656,7 @@ def random_live(s: Scenario, rng: random.Random, slot: int) -> None:
 
 
 def random_pending(s: Scenario, rng: random.Random, slot: int) -> None:
+    """Choose an acknowledgment, reject or other event for a pending command."""
     order = s.device.store.view(slot)
     cmd = order.outstanding
     assert cmd is not None
@@ -643,6 +686,7 @@ def random_pending(s: Scenario, rng: random.Random, slot: int) -> None:
 
 
 def randomized(s: Scenario, seed: int, operations: int) -> None:
+    """Generate a repeatable sequence of mixed legal and exceptional transactions."""
     rng = random.Random(seed)
     s.up()
     for pos in range(operations):
@@ -669,6 +713,7 @@ def randomized(s: Scenario, seed: int, operations: int) -> None:
 
 
 def main() -> None:
+    """Generate reproducible OUCH stimulus files for the chosen slot geometry."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=lambda raw: int(raw, 0), default=0x0AC405)

@@ -18,6 +18,7 @@ class RateError(ValueError):
 
 
 def integer_field(row, key, limit):
+    """Read a named raw field and check its unsigned range."""
     if key not in row:
         raise RateError(f"missing epoch field {key}")
     value = row[key]
@@ -43,10 +44,12 @@ class RateEpoch:
 
     @property
     def word(self):
+        """Return the fixed-width word corresponding to this value or memory address."""
         return (self.integer_ns << 32) | self.fraction_ns
 
     @classmethod
     def from_mapping(cls, row):
+        """Construct a validated typed record from external field names and values."""
         if not isinstance(row, dict) or set(row) != {"tick", "integer_ns", "fraction_ns"}:
             raise RateError("each epoch requires tick, integer_ns and fraction_ns fields")
         return cls(
@@ -58,6 +61,7 @@ class RateEpoch:
 
 class RateMap:
     def __init__(self, epochs):
+        """Validate and retain the timestamped clock-rate epochs."""
         self.epochs = tuple(epochs)
         if not self.epochs:
             raise RateError("at least one recorded rate epoch is needed")
@@ -80,11 +84,13 @@ class RateMap:
 
     @classmethod
     def parse(cls, raw):
+        """Load external clock epochs and validate their sequence and geometry."""
         if not isinstance(raw, list):
             raise RateError("expected a JSON list of clock epochs")
         return cls(RateEpoch.from_mapping(item) for item in raw)
 
     def integrated(self, tick):
+        """Convert cumulative modular ticks to exact elapsed time across the rate epochs."""
         offset = modular_delta(tick, self.base)
         if offset >= HALF64:
             raise RateError("tick precedes the earliest supplied epoch or has ambiguous age")
@@ -92,6 +98,7 @@ class RateMap:
         return self.integral[epoch] + (offset - self.offsets[epoch]) * self.epochs[epoch].word
 
     def elapsed(self, start, stop):
+        """Measure elapsed time between two timestamps across any intervening rate changes."""
         forward = modular_delta(stop, start)
         if forward >= HALF64:
             raise RateError("latency interval is negative or ambiguous")
@@ -102,6 +109,7 @@ class RateMap:
 
 
 def render(event, clock):
+    """Produce the decoded event with time units available for display."""
     data = event_json(event)
     if event.status == Status.MATCH:
         interval = clock.elapsed(event.start_tick, event.end_tick)
@@ -116,6 +124,7 @@ def render(event, clock):
 
 
 def main():
+    """Decode timestamped observations using the supplied clock-rate map."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("epochs", type=Path)
     parser.add_argument("events", type=Path)

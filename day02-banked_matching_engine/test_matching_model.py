@@ -8,21 +8,25 @@ from matching_workload import cancel, interleave, level, new, reduce
 
 
 class BookSemantics(unittest.TestCase):
+    # Create a fresh reference configuration for each model test.
     def setUp(self):
         self.profile = PROFILES["default"]
         self.book = Book(self.profile)
 
+    # Apply a command and return its terminal event for concise assertions.
     def event(self, command):
         events = self.book.apply(command)
         self.assertEqual(len(events), 1)
         return events[0]
 
+    # Verify one side and price reports the expected open quantity and order count.
     def assert_query(self, side, price, quantity, count):
         result = self.event(level(0, price, side))
         self.assertEqual(result.kind, Kind.LEVEL)
         self.assertEqual(result.level_quantity, quantity)
         self.assertEqual(result.level_count, count)
 
+    # Check that overlapping input errors report the contract's first rejection reason.
     def test_reject_precedence(self):
         bad = new(0, self.profile.slots, self.profile.prices, 0, tif=3)
         self.assertEqual(self.event(bad).reject, Reject.ID)
@@ -38,6 +42,7 @@ class BookSemantics(unittest.TestCase):
                          Reject.POST_ONLY)
         self.assert_query(False, 0, 2, 1)
 
+    # Verify that reducing size does not move an order behind later arrivals.
     def test_partial_maker_and_reduction_keep_priority(self):
         self.event(new(0, 7, 3, 9, True))
         self.event(new(0, 1, 3, 5, True))
@@ -52,6 +57,7 @@ class BookSemantics(unittest.TestCase):
         self.assertEqual([event.remaining for event in sweep], [1, 0])
         self.assert_query(True, 3, 4, 1)
 
+    # Check price-first and FIFO selection when a sell order crosses bids.
     def test_sell_chooses_highest_bid_then_oldest(self):
         self.event(new(0, 0, 3, 5))
         self.event(new(0, 1, 5, 2))
@@ -63,6 +69,7 @@ class BookSemantics(unittest.TestCase):
         self.assert_query(False, 3, 3, 1)
         self.assert_query(True, 3, 0, 0)
 
+    # Check that IOC expires and GTC rests any unfilled quantity.
     def test_ioc_and_gtc_handle_remainders_differently(self):
         self.event(new(0, 0, 2, 1, True))
         ioc = self.book.apply(new(0, 1, 2, 6, tif=TimeInForce.IOC))
@@ -77,6 +84,7 @@ class BookSemantics(unittest.TestCase):
         self.assertEqual(gtc[-1].remaining, 5)
         self.assert_query(False, 2, 5, 1)
 
+    # Verify the aggregate can represent multiple maximum-sized orders.
     def test_full_level_aggregate_extends_quantity_width(self):
         for order_id in range(self.profile.slots):
             self.event(new(0, order_id, 5, self.profile.qty_max))
@@ -87,6 +95,7 @@ class BookSemantics(unittest.TestCase):
             total -= self.profile.qty_max
             self.assert_query(False, 5, total, self.profile.slots - order_id - 1)
 
+    # Match one incoming order against the maximum number of resting makers.
     def test_one_command_can_consume_all_other_slots(self):
         capacity = self.profile.slots
         for order_id in range(capacity - 1):
@@ -100,6 +109,7 @@ class BookSemantics(unittest.TestCase):
 
 
 class InstrumentIsolation(unittest.TestCase):
+    # Maintain distinct books even when instruments reuse identical order IDs.
     def test_equal_ids_do_not_share_liquidity(self):
         reference = Reference(PROFILES["default"])
         reference.execute(new(0, 0, 3, 5, True))
@@ -110,6 +120,7 @@ class InstrumentIsolation(unittest.TestCase):
         self.assertEqual((bank_zero.level_quantity, bank_one.level_quantity), (5, 6))
         self.assertEqual((bank_zero.command_sequence, bank_one.command_sequence), (1, 2))
 
+    # Ensure unsupported instruments affect the error sequence alone.
     def test_invalid_instruments_share_only_the_error_lane(self):
         profile = PROFILES["wide"]
         reference = Reference(profile)
@@ -120,6 +131,7 @@ class InstrumentIsolation(unittest.TestCase):
         self.assertTrue(all(event.reject == Reject.INSTRUMENT for event in events))
         self.assertEqual(reference.execute(level(0, 0, False))[0].event_sequence, 0)
 
+    # Check multiple fills consume separate event sequence values across wrap.
     def test_event_sequence_advances_within_a_command_and_wraps(self):
         profile = replace(PROFILES["default"], sequence_width=2)
         reference = Reference(profile)
@@ -131,6 +143,7 @@ class InstrumentIsolation(unittest.TestCase):
         self.assertEqual(reference.execute(cancel(0, 2))[0].command_sequence, 3)
         self.assertEqual(reference.execute(level(0, 1, True))[0].command_sequence, 0)
 
+    # Verify that legal cross-bank ordering cannot alter each bank's observable history.
     def test_legal_cross_bank_interleavings_keep_local_results(self):
         profile = PROFILES["default"]
         tapes = [
@@ -148,6 +161,7 @@ class InstrumentIsolation(unittest.TestCase):
             crossed[command.instrument].extend(right.execute(command))
         self.assertEqual(serial, crossed)
 
+    # Check that reset flushes both book state and sequence state.
     def test_reset_clears_live_orders_and_resets_each_sequence(self):
         reference = Reference(PROFILES["default"])
         reference.execute(new(0, 0, 3, 5, True))

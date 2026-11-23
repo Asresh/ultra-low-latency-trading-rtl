@@ -29,6 +29,7 @@ module tb_market_mbo_book;
     integer operations = 0, replace_checks = 0, both_levels_occupied = 0;
     integer withheld = 0, wrong_statuses = 0, snapshots = 0, full_deletes = 0;
 
+    // Advance the bench to a rising edge, then allow sequential outputs to settle.
     task automatic rising;
         #2;
         clk = 1'b1;
@@ -37,6 +38,7 @@ module tb_market_mbo_book;
         #1;
     endtask
 
+    // Clear the directed book test and optionally pulse the hardware reset.
     task automatic new_book(input bit power_reset);
         if (power_reset)
             rst = 1'b1;
@@ -50,6 +52,7 @@ module tb_market_mbo_book;
         snapshots++;
     endtask
 
+    // Count reference order rows matching the requested side and price.
     function automatic integer count_px(input bit sell, input integer px);
         integer count;
         count = 0;
@@ -59,6 +62,7 @@ module tb_market_mbo_book;
         return count;
     endfunction
 
+    // Sum remaining quantity at the selected side and price in the reference rows.
     function automatic integer sum_px(input bit sell, input integer px);
         integer amount;
         amount = 0;
@@ -68,6 +72,7 @@ module tb_market_mbo_book;
         return amount;
     endfunction
 
+    // Compare one hardware order slot with the independent reference row.
     task automatic check_slot(input integer slot);
         bit present;
         present = slot < SLOTS && ref_live[slot];
@@ -83,6 +88,7 @@ module tb_market_mbo_book;
             $fatal(1, "invalid slot exposed previous data");
     endtask
 
+    // Compare one level's aggregate count and quantity to a reference scan.
     task automatic check_level(input bit sell, input integer px);
         side = sell;
         price = PW'(px);
@@ -91,6 +97,7 @@ module tb_market_mbo_book;
             $fatal(1, "side %0d price %0d aggregate after op %0d", sell, px, operations);
     endtask
 
+    // Scan active orders to verify the strongest bid and ask.
     task automatic check_best;
         integer bb, ba, count;
         count = 0;
@@ -121,6 +128,7 @@ module tb_market_mbo_book;
             $fatal(1, "empty ask carries stale data");
     endtask
 
+    // Check every order and price row against the test's reconstructed reference state.
     task automatic verify_memory;
         commit = 1'b0;
         for (integer slot = 0; slot <= SLOTS; slot++)
@@ -131,6 +139,7 @@ module tb_market_mbo_book;
         check_best();
     endtask
 
+    // Apply an order mutation, then check the affected reference levels and slots.
     task automatic step(
         input logic [3:0] operation, input integer source_slot, input integer target_slot,
         input bit sell, input integer new_px, input integer amount,

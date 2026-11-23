@@ -20,21 +20,25 @@ class Status(IntEnum):
 
 
 def modular_delta(later, earlier):
+    """Measure forward tick distance with the wraparound behavior of the hardware counter."""
     return (later - earlier) & LIMIT64
 
 
 def saturated_add(a, b, maximum):
+    """Add counts without allowing the result to wrap past its maximum."""
     value = a + b
     return min(value, maximum), value > maximum
 
 
 def fit(value, width, description):
+    """Reject an integer that cannot be represented in the requested hardware field."""
     if not 0 <= value < 1 << width:
         raise ValueError(f"{description} {value} cannot fit in {width} bits")
     return value
 
 
 def fields_to_int(entries):
+    """Concatenate values in declared order after checking each width."""
     result = 0
     for value, width in entries:
         result = (result << width) | fit(value, width, "field")
@@ -51,24 +55,30 @@ class Geometry:
 
     @property
     def sets(self):
+        """Return the number of independently hashed table sets."""
         return 1 << self.index_width
 
     @property
     def slots(self):
+        """Return the total number of resident observation slots."""
         return 2 * self.sets
 
     @property
     def sweep_period(self):
+        """Calculate the number of model cycles between scan events."""
         return 1 << self.scan_log
 
     @property
     def key_width(self):
+        """Return the number of bits occupied by group and tag."""
         return self.tag_width + self.class_width
 
     def key_bits(self, event):
+        """Pack the event's group and tag into its exact hardware lookup key."""
         return fields_to_int(((event.event_class, self.class_width), (event.tag, self.tag_width)))
 
     def set_of(self, event):
+        """Fold the packed key into the configured number of set bits."""
         key = self.key_bits(event)
         mask = self.sets - 1
         hashed = 0
@@ -78,6 +88,7 @@ class Geometry:
         return hashed
 
     def encode(self, event):
+        """Pack one stimulus event using the parameterized correlator input layout."""
         return fields_to_int((
             (int(event.is_end), 1),
             (event.event_class, self.class_width),
@@ -97,6 +108,7 @@ class Observation:
 
     @property
     def key(self):
+        """Return the canonical identity used for grouping or table lookup."""
         return self.event_class, self.tag
 
 
@@ -114,6 +126,7 @@ class Report:
 
     @classmethod
     def single(cls, status, event, observed_tick):
+        """Build a diagnostic report for an event with no matched endpoint."""
         start = None if event.is_end else event
         end = event if event.is_end else None
         return cls(
@@ -130,6 +143,7 @@ class Report:
 
     @classmethod
     def pair(cls, first, second, observed_tick):
+        """Build a paired report from the start and stop records."""
         if first.key != second.key or first.is_end == second.is_end:
             raise ValueError("pair requires opposite endpoints with the same key")
         start, stop = (second, first) if first.is_end else (first, second)
@@ -148,6 +162,7 @@ class Report:
         )
 
     def unit_word(self, geometry):
+        """Pack a report using the parameterized unit-test field widths."""
         return fields_to_int((
             (int(self.status), 3),
             (self.event_class, geometry.class_width),
@@ -161,6 +176,7 @@ class Report:
         ))
 
     def transport_word(self):
+        """Pack a report using the public capture-stream layout."""
         return fields_to_int((
             (int(self.status), 3),
             (self.event_class, 8),
@@ -181,6 +197,7 @@ class Resident:
     admitted: int
 
     def expired(self, now, limit):
+        """Check if the resident observation exceeded the configured tick limit."""
         elapsed = modular_delta(now, self.admitted)
         return limit <= elapsed < HALF64
 
@@ -195,10 +212,12 @@ class Cycle:
 
 class Correlator:
     def __init__(self, geometry):
+        """Create the correlator reference at the supplied table geometry."""
         self.geometry = geometry
         self.reset()
 
     def reset(self):
+        """Clear volatile state to the documented power-on defaults."""
         self.table = {}
         self.report = None
         self.cursor = 0
@@ -206,6 +225,7 @@ class Correlator:
         self.evictions = 0
 
     def _apply(self, event, now, limit, armed):
+        """Process one live observation using the current arm and expiration policy."""
         if not armed:
             return Report.single(Status.DISARMED, event, now)
         if modular_delta(now, event.tick) >= HALF64:
@@ -236,6 +256,7 @@ class Correlator:
         return Report.single(Status.STORED, event, now)
 
     def _scan(self, now, limit):
+        """Visit the next resident slot and emit an expiration report if warranted."""
         examined = self.cursor
         self.cursor = (self.cursor + 1) % self.geometry.slots
         resident = self.table.get(examined)
@@ -245,6 +266,7 @@ class Correlator:
         return Report.single(Status.EXPIRED, resident.observation, now)
 
     def step(self, *, tick, timeout, observation, sink_ready, armed, reset=False, flush=False):
+        """Advance the state machine by one edge and return its modeled outputs."""
         if reset:
             self.reset()
             return Cycle(False, None, 0, 0)
@@ -267,6 +289,7 @@ class Correlator:
 
 
 def bucket_of(ticks, bucket_count):
+    """Map a raw-tick sample to a logarithmic bucket with saturation."""
     if ticks < 0:
         raise ValueError("a histogram delay must be nonnegative")
     if bucket_count < 5:
@@ -276,6 +299,7 @@ def bucket_of(ticks, bucket_count):
 
 
 def bucket_bounds(index, bucket_count):
+    """Return the inclusive endpoints for one logarithmic bin."""
     if not 0 <= index < bucket_count:
         raise ValueError("bucket outside histogram geometry")
     if index < 4:
@@ -298,9 +322,11 @@ class ClassHistogram:
     overflow: bool = False
 
     def __post_init__(self):
+        """Allocate counters and bounds for each latency bucket."""
         self.buckets = [0 for _ in range(self.bucket_count)]
 
     def add(self, duration):
+        """Update the count, sum, min, max, and logarithmic bucket for this sample."""
         fit(duration, 64, "duration")
         which = bucket_of(duration, self.bucket_count)
         maximum_count = (1 << self.counter_width) - 1
@@ -315,6 +341,7 @@ class ClassHistogram:
         self.overflow |= bucket_overflow or count_overflow or sum_overflow
 
     def snapshot_words(self, number):
+        """Serialize current counters for one histogram class."""
         tag = (
             (number, 8),
             (self.bucket_count, 8),
@@ -332,6 +359,7 @@ class ClassHistogram:
 
 
 def histogram_words(class_samples, bucket_count, frame_id, tick, counter_width=32):
+    """Serialize a complete histogram snapshot from raw class samples."""
     yield fields_to_int(((0x4C545331, 32), (frame_id, 32), (tick, 64)))
     for number, samples in enumerate(class_samples):
         metrics = ClassHistogram(bucket_count, counter_width)
@@ -349,9 +377,11 @@ class CapturedTrace:
 
     @property
     def trigger(self):
+        """Return the event that caused the bounded trace to freeze."""
         return self.reports[self.trigger_offset]
 
     def serialize(self):
+        """Encode the frame header and each record in capture order."""
         trigger = self.trigger
         yield fields_to_int((
             (0x4C545231, 32),
@@ -368,6 +398,7 @@ class CapturedTrace:
 
 
 def bounded_trace(reports, depth, post, mask, threshold, frame_id=0):
+    """Choose the retained ring window around the first qualifying trigger."""
     if not (1 <= depth <= 128 and 0 <= post < depth):
         raise ValueError("trace depth or post count out of range")
     for index, report in enumerate(reports):

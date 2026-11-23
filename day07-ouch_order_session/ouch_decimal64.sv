@@ -37,6 +37,7 @@ module ouch_decimal64 (
     assign s_ready = !flush && state == IDLE;
     assign m_valid = !flush && state == RESULT;
 
+    // Convert packed digits into ASCII and fill unused leading columns with spaces.
     function automatic [159:0] format_bcd(input logic [79:0] packed_digits);
         logic leading;
         logic [3:0] d;

@@ -1,0 +1,6 @@
+tag,instrument,side,price,quantity,fee_bps,rounding,limit
+3,DEMO,buy,12.5,2,400,nearest_even,26
+4,DEMO,sell,12.5,2,400,floor,24
+3,DEMO,buy,1.5,1,7500,nearest_even,3
+5,DEMO,sell,1,0,500,ceil,
+6,DEMO,buy,0.00390625,1,0,floor,0

@@ -24,6 +24,7 @@ class CaptureError(ValueError):
 
 
 def check_output_paths(inputs, outputs):
+    """Reject aliases between input and writable paths before a tool opens output files."""
     occupied = [path for path in inputs if path is not None]
     for output in outputs:
         if output is None:
@@ -50,10 +51,12 @@ class CapturePacket:
 
     @property
     def truncated(self):
+        """Report when the capture saved fewer bytes than the original packet length."""
         return self.wire_length != len(self.captured)
 
     @property
     def key(self):
+        """Identify an interface by both its section and interface number."""
         return (self.section, self.interface)
 
 
@@ -67,10 +70,12 @@ class Interface:
     fcs_bytes: int = 0
 
     def time_in_ns(self, ticks):
+        """Convert device ticks to an exact nanosecond fraction with the interface offset."""
         return (ticks*NANOSECOND)//self.resolution + self.time_offset*NANOSECOND
 
 
 def read_exact(handle, length, label):
+    """Read a complete field or raise a diagnostic on premature end of file."""
     data = handle.read(length)
     if len(data) != length:
         raise CaptureError(f"truncated {label}: need {length} bytes, got {len(data)}")
@@ -78,6 +83,7 @@ def read_exact(handle, length, label):
 
 
 def read_optional(handle, length, label):
+    """Distinguish a clean record boundary at EOF from a partially read field."""
     data = handle.read(length)
     if not data:
         return None
@@ -87,10 +93,12 @@ def read_optional(handle, length, label):
 
 
 def aligned_length(size):
+    """Round a data size up to its four-byte storage boundary."""
     return (size+3) & ~3
 
 
 def decode_options(blob, endian):
+    """Decode and check option headers, padding, terminator, and values."""
     offset = 0
     while offset < len(blob):
         if offset+4 > len(blob):
@@ -110,6 +118,7 @@ def decode_options(blob, endian):
 
 
 def decode_interface(blob, endian):
+    """Parse the declared link type and clock properties for one interface."""
     if len(blob) < 8:
         raise CaptureError("truncated pcapng interface description")
     link_type, _, snaplen = struct.unpack_from(endian+"HHI", blob)
@@ -141,6 +150,7 @@ def decode_interface(blob, endian):
 
 
 def decode_enhanced(blob, endian, interfaces, serial, section):
+    """Read an enhanced packet using its section's interface metadata."""
     if len(blob) < 20:
         raise CaptureError("truncated pcapng enhanced packet fields")
     iface, high, low, caplen, wirelen = struct.unpack_from(endian+"5I", blob)
@@ -168,6 +178,7 @@ def decode_enhanced(blob, endian, interfaces, serial, section):
 
 
 def decode_simple(blob, endian, interfaces, serial, section):
+    """Recover captured bytes for the first declared interface without a timestamp."""
     if len(blob) < 4 or not interfaces:
         raise CaptureError("pcapng simple packet requires interface zero and original length")
     wirelen, = struct.unpack_from(endian+"I", blob)
@@ -180,6 +191,7 @@ def decode_simple(blob, endian, interfaces, serial, section):
 
 
 def ng_block_body(handle, endian, raw_total, label, *, already_read=0, limit=DEFAULT_LIMIT):
+    """Read a bounded PCAPng body and verify the trailing repeated size."""
     total, = struct.unpack(endian+"I", raw_total)
     if total < 12+already_read or total % 4 or total > limit:
         raise CaptureError(f"invalid {label} block length {total}")
@@ -190,6 +202,7 @@ def ng_block_body(handle, endian, raw_total, label, *, already_read=0, limit=DEF
 
 
 def pcapng_packets(handle, block_type, limit):
+    """Iterate sections, switch byte order, and resolve each packet's interface."""
     endian = ""
     interfaces = []
     section = -1
@@ -228,6 +241,7 @@ def pcapng_packets(handle, block_type, limit):
 
 
 def pcap_packets(handle, magic, limit):
+    """Decode classic PCAP packet records in their recorded time unit and endian."""
     endian, fractions_per_second = CLASSIC_MAGIC[magic]
     header = read_exact(handle, 20, "pcap file header")
     version_major, version_minor, _, _, snaplen, network = struct.unpack(endian+"HHiiii", header)
@@ -254,6 +268,7 @@ def pcap_packets(handle, magic, limit):
 
 
 def packets_from(handle, limit=DEFAULT_LIMIT):
+    """Detect the capture container from its initial magic before decoding it."""
     if limit < 64:
         raise ValueError("reader limit must be at least 64 bytes")
     magic = read_exact(handle, 4, "capture signature")
@@ -266,11 +281,13 @@ def packets_from(handle, limit=DEFAULT_LIMIT):
 
 
 def packets(path, limit=DEFAULT_LIMIT):
+    """Open a capture path and yield packet records while owning the file lifetime."""
     with Path(path).open("rb") as handle:
         yield from packets_from(handle, limit=limit)
 
 
 def tick_period_ns(frequency_hz):
+    """Express the replay clock period as an exact rational number of nanoseconds."""
     if frequency_hz <= 0:
         raise ValueError("frequency must be positive")
     return Fraction(NANOSECOND, frequency_hz)

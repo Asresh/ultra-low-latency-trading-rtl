@@ -18,7 +18,9 @@ OUCH := day07-ouch_order_session
 DMA := day08-host_dma_queues
 LEGACY := $(FEED) $(BOOK) $(RISK)
 EXPANSION := $(ETHERNET) $(MBO) $(LATENCY) $(OUCH) $(DMA)
-PROJECTS ?= $(LEGACY) $(EXPANSION)
+BEGINNER := day10-stream_width_converter day11-best_quote_selector day12-message_rate_limiter \
+            day13-timestamped_stream_replayer day14-fixed_point_notional
+PROJECTS ?= $(LEGACY) $(EXPANSION) $(BEGINNER)
 HDL_HEADERS := $(wildcard $(BOOK)/*.svh $(RISK)/*.svh)
 BOOK_RTL = $(addprefix $(BOOK)/,$(shell sed -e 's/\#.*//' $(BOOK)/rtl.f))
 RISK_RTL = $(addprefix $(RISK)/,$(shell sed -e 's/\#.*//' $(RISK)/rtl.f))
@@ -59,6 +61,7 @@ formal:
 	cd $(BOOK)/formal && $(SBY) -f --prefix ../build/arbiter arbiter.sby prove cover
 	cd $(RISK)/formal && $(SBY) -f --prefix ../build/gateway gateway.sby bmc cover
 	$(MAKE) -C $(MBO) formal SBY="$(SBY)"
+	@set -e; for project in $(BEGINNER); do $(MAKE) -C "$$project" formal SBY="$(SBY)"; done
 
 netlist-check:
 	$(MAKE) -C $(RISK) test-gate YOSYS="$(YOSYS)"

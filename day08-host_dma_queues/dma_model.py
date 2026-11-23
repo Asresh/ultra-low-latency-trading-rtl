@@ -26,27 +26,33 @@ class Fatal(IntEnum):
 
 class SparseMemory:
     def __init__(self, fill=0):
+        """Initialize empty byte-addressed storage with the checked default fill."""
         self.fill = bounded(fill,8,"memory fill")
         self.cells = {}
 
     @staticmethod
     def check(address, length):
+        """Validate the requested memory span before reading or committing any bytes."""
         bounded(address,64,"physical address")
         if length < 0 or address+length > 1<<64:
             raise ValueError("memory span wraps")
 
     def read(self,address,length):
+        """Read bytes from sparse storage, substituting the default fill for unwritten locations."""
         self.check(address,length)
         return bytes(self.cells.get(address+i,self.fill) for i in range(length))
 
     def write(self,address,data):
+        """Write every supplied byte at consecutive positions in sparse memory."""
         self.check(address,len(data))
         self.cells.update((address+i,byte) for i,byte in enumerate(data))
 
     def word(self,address):
+        """Return the fixed-width word corresponding to this value or memory address."""
         return int.from_bytes(self.read(address,LANES),"little")
 
     def strobed(self,address,word,mask):
+        """Write only AXI byte lanes selected by the strobe mask."""
         self.check(address,LANES)
         bounded(mask,8,"write strobe")
         lanes = bounded(word,64,"write word").to_bytes(LANES,"little")
@@ -78,6 +84,7 @@ class AxiFault:
     apply_write: bool = False
 
     def __post_init__(self):
+        """Validate the bus phase, address and count for this fault injection."""
         AxiResponse(self.response)
         if self.remaining < 0:
             raise ValueError("fault injection hit count must be nonnegative")
@@ -85,6 +92,7 @@ class AxiFault:
             bounded(self.address,64,"fault address")
 
     def select(self, phase, queue, address):
+        """Check whether an armed fault matches this request and consume one hit."""
         valid = self.remaining and self.phase == phase and (
             self.queue is None or self.queue == queue
         ) and (self.address is None or self.address == address)
@@ -95,17 +103,20 @@ class AxiFault:
 
 class Fabric:
     def __init__(self,memory=None,faults=()):
+        """Attach a memory model, programmable faults, and a recording bus trace."""
         self.memory = memory if memory is not None else SparseMemory()
         self.faults = list(faults)
         self.trace = []
 
     def fault(self,phase,queue,address):
+        """Find and consume the next matching fault for this memory transaction."""
         for rule in self.faults:
             if rule.select(phase,queue,address):
                 return rule
         return None
 
     def read(self,queue,phase,address,length):
+        """Read through a planned AXI transaction while recording and applying bus faults."""
         raw = bytearray()
         failed = False
         for burst in burst_plan(address,length):
@@ -124,6 +135,7 @@ class Fabric:
         return bytes(raw[:length]),failed,False
 
     def _write_burst(self,queue,phase,burst,data,offset):
+        """Apply one AXI burst and record data, masks and response order."""
         self.trace.append(Access(queue,phase,"AW",burst.address,burst.axlen))
         rule = self.fault(phase,queue,burst.address)
         response = rule.response if rule else AxiResponse.OKAY
@@ -134,6 +146,7 @@ class Fabric:
         return Access(queue,phase,"B",burst.address,response=response)
 
     def write(self,queue,phase,address,data):
+        """Run the AXI write plan and stop after the first rejected bus response."""
         for burst in burst_plan(address,len(data)):
             reply = self._write_burst(queue,phase,burst,data,burst.address-address)
             self.trace.append(reply)
@@ -142,6 +155,7 @@ class Fabric:
         return True
 
     def prepare_completion_write(self,queue,address,data):
+        """Stage CQ writeback while keeping its B response separately acknowledgeable."""
         burst, = burst_plan(address,len(data))
         return self._write_burst(queue,Phase.COMPLETION,burst,data,0)
 
@@ -152,6 +166,7 @@ class Capture:
     delays: tuple = ()
 
     def __post_init__(self):
+        """Check capture delays agree with the number of available beats."""
         if self.delays and len(self.delays) != len(self.beats):
             raise ValueError("capture delays must match input beat count")
         if any(delay < 0 for delay in self.delays):
@@ -159,9 +174,11 @@ class Capture:
 
     @classmethod
     def body(cls,payload,delays=()):
+        """Construct a capture from canonical packet beats and optional delays."""
         return cls(tuple(packet_beats(payload)),tuple(delays))
 
     def resolve(self,expected,timeout):
+        """Validate framing while applying the configured capture timeout."""
         observed = bytearray()
         drain_elapsed = None
         delays = self.delays or (0,)*len(self.beats)
@@ -204,10 +221,12 @@ class Irq:
     request: bool = False
 
     def __post_init__(self):
+        """Validate timer and moderation settings before tracking interrupt state."""
         bounded(self.minimum_batch,8,"IRQ batch")
         bounded(self.maximum_delay,32,"IRQ delay")
 
     def edge(self, *, completion=False, immediate=False, acknowledge=False):
+        """Advance interrupt state through acknowledgment, a completion and timer changes."""
         if acknowledge:
             self.request = False
             self.backlog = 0
@@ -224,6 +243,7 @@ class Irq:
         self.request |= completion and immediate
 
     def idle(self,cycles):
+        """Advance the moderation timer during cycles without completions."""
         if cycles < 0:
             raise ValueError("cannot move IRQ clock backwards")
         if cycles and self.backlog:
@@ -244,22 +264,27 @@ class Queue:
 
     @classmethod
     def fresh(cls,config,seed,batch,delay):
+        """Initialize absolute queue cursors and interrupt settings from configuration."""
         bounded(seed,32,"queue seed")
         return cls(config,seed,seed,seed,seed,Irq(batch,delay))
 
     @property
     def submission_count(self):
+        """Return the outstanding descriptor count using modular ring cursors."""
         return self.config.sq.live(self.sq_tail,self.sq_head)
 
     @property
     def completion_count(self):
+        """Return generated completions that the host has yet to release."""
         return self.config.cq.live(self.cq_tail,self.cq_head)
 
     @property
     def eligible(self):
+        """Check for work that can start immediately with current credits."""
         return self.submission_count>0 and self.completion_count<self.config.cq.entries
 
     def doorbell(self,sq_tail,cq_head):
+        """Atomically update SQ producer and CQ consumer cursors if both are valid."""
         submitted = distance(sq_tail,self.sq_tail)
         consumed = distance(cq_head,self.cq_head)
         if submitted>self.config.sq.entries-self.submission_count or consumed>self.completion_count:
@@ -276,6 +301,7 @@ class Emission:
     bytes: bytes
 
     def beats(self):
+        """Return the packet as ordered AXI stream beats with a final partial mask."""
         return tuple(packet_beats(self.bytes))
 
 
@@ -289,6 +315,7 @@ class Pending:
 
 class Engine:
     def __init__(self,fabric=None,*,capture_timeout=128,queues=2):
+        """Initialize independent host queues, interrupt state and descriptor scheduling."""
         if capture_timeout <= 0 or queues < 1:
             raise ValueError("capture timeout and queue count must be positive")
         self.fabric = fabric if fabric is not None else Fabric()
@@ -306,6 +333,7 @@ class Engine:
         self.completions = []
 
     def configure(self,index,config=None,*,seed=0,irq_batch=0,irq_delay=0):
+        """Install a queue's aligned ring geometry before making it active."""
         if not 0 <= index < len(self.queues) or self.pending or self.fatal:
             return False
         old = self.queues[index]
@@ -315,11 +343,13 @@ class Engine:
         return True
 
     def _queue(self,index):
+        """Resolve a configured queue index or raise a clear model error."""
         if not 0 <= index < len(self.queues) or self.queues[index] is None:
             raise ValueError("queue is disabled or out of range")
         return self.queues[index]
 
     def idle(self,cycles):
+        """Advance IRQ timers across queues without issuing another descriptor."""
         if cycles < 0:
             raise ValueError("cannot advance a negative time")
         self.timestamp = (self.timestamp+cycles)&U64_MASK
@@ -328,6 +358,7 @@ class Engine:
                 queue.irq.idle(cycles)
 
     def host_post(self,index,descriptor,capture=None):
+        """Write a descriptor into simulated host memory and publish its SQ cursor."""
         queue = self._queue(index)
         if queue.submission_count == queue.config.sq.entries:
             return False
@@ -339,9 +370,11 @@ class Engine:
     def push_capture(self,index,capture):
         # Use only with externally staged SQ images. host_post records its
         # own per-descriptor capture entry, including a missing packet.
+        """Attach provider stream beats to the corresponding queued capture operation."""
         self._queue(index).captures.append(capture)
 
     def reap(self,index,count=None):
+        """Release the requested count of host-visible completions from this queue."""
         queue = self._queue(index)
         ready = queue.completion_count
         count = ready if count is None else count
@@ -355,9 +388,11 @@ class Engine:
         return records
 
     def eligible(self):
+        """Check for work that can start immediately with current credits."""
         return tuple(i for i,queue in enumerate(self.queues) if queue and queue.eligible)
 
     def select(self):
+        """Return the first eligible queue starting at the round-robin cursor."""
         available = set(self.eligible())
         for offset in range(len(self.queues)):
             slot = (self.cursor+offset)%len(self.queues)
@@ -366,6 +401,7 @@ class Engine:
         return None
 
     def _execute(self,index,queue,descriptor,capture):
+        """Perform a checked DMA operation and construct its eventual completion."""
         validation = descriptor.validate(queue.config.aperture)
         if validation != Status.OK or descriptor.op == Opcode.FENCE:
             return validation,0
@@ -390,6 +426,7 @@ class Engine:
         return (Status.OK if success else Status.WRITE_ERROR),digest
 
     def start(self):
+        """Execute the scheduler's next eligible descriptor and defer CQ visibility to B."""
         if self.pending or self.fatal:
             return None
         index = self.select()
@@ -418,6 +455,7 @@ class Engine:
         return self.pending
 
     def ack_completion(self,irq_acknowledged=()):
+        """Commit the deferred completion response before exposing any new CQ credit."""
         if self.pending is None:
             return None
         work = self.pending

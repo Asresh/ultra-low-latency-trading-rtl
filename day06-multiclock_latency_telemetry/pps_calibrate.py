@@ -21,6 +21,7 @@ class CalibrationError(ValueError):
 
 
 def exact_decimal(token):
+    """Parse a base-10 input without first introducing binary floating-point error."""
     try:
         return Fraction(token)
     except (ValueError, ZeroDivisionError) as exc:
@@ -28,6 +29,7 @@ def exact_decimal(token):
 
 
 def median(values):
+    """Compute the exact central value of a finite sample window."""
     sorted_values = sorted(values)
     if not sorted_values:
         raise CalibrationError("cannot estimate an empty population")
@@ -38,6 +40,7 @@ def median(values):
 
 
 def nearest_fixed(value, scale):
+    """Convert a rational value to the requested fixed-point scale."""
     scaled = value * scale
     quotient, remainder = divmod(scaled.numerator, scaled.denominator)
     # Round to nearest, ties to even.
@@ -48,6 +51,7 @@ def nearest_fixed(value, scale):
 
 
 def unsigned_integer(raw, label):
+    """Parse a nonnegative integer with a label for diagnostics."""
     try:
         if raw.startswith(("0x", "0X")):
             result = int(raw, 16)
@@ -76,6 +80,7 @@ class Window:
 
     @property
     def period(self):
+        """Return raw elapsed ticks per second for the selected PPS interval."""
         return Fraction(self.nanoseconds, self.ticks)
 
 
@@ -94,6 +99,7 @@ class Estimate:
 
     @property
     def rate_word(self):
+        """Quantize the estimated period to the hardware register representation."""
         fixed = nearest_fixed(self.period, Q32)
         if not 0 < fixed < 1 << 64:
             raise CalibrationError("computed period outside the unsigned 32.32 register range")
@@ -101,14 +107,17 @@ class Estimate:
 
     @property
     def rounded_period(self):
+        """Convert the programmed fixed-point period back to engineering units."""
         return Fraction(self.rate_word, Q32)
 
     @property
     def rate_ppm(self):
         # Sign describes raw oscillator frequency, rather than period.
+        """Express the measured rate error relative to the nominal clock in parts per million."""
         return (self.nominal / self.period - 1) * PPM
 
     def as_json(self, armed):
+        """Expose the estimate and register settings in a serializable object."""
         bits = self.rate_word
         return {
             "period_ns": float(self.period),
@@ -132,6 +141,7 @@ class Estimate:
 
 
 def read_pps(rows):
+    """Read raw PPS records and validate the integer fields in each row."""
     reader = csv.DictReader(rows)
     fields = set(reader.fieldnames or ())
     if not {"second", "tick"}.issubset(fields):
@@ -153,6 +163,7 @@ def read_pps(rows):
 
 
 def verify_points(points):
+    """Check PPS samples are ordered and unambiguous across counter wrap."""
     if len(points) < 3:
         raise CalibrationError("at least three PPS points are needed")
     for previous, current in zip(points, points[1:]):
@@ -168,6 +179,7 @@ def verify_points(points):
 
 
 def interval_windows(points, min_seconds, max_seconds):
+    """Build candidate intervals within the requested time-window bounds."""
     seconds = [point.second for point in points]
     for start, a in enumerate(points):
         end = bisect_left(seconds, a.second + min_seconds, lo=start + 1)
@@ -190,6 +202,7 @@ def estimate_period(
     jitter_ticks=3,
     ppm_limit=Fraction(10000),
 ):
+    """Fit a period from consistent PPS windows subject to jitter and rate limits."""
     if nominal <= 0 or not 1 <= min_seconds <= max_seconds:
         raise CalibrationError("period and window bounds must be positive")
     if min_windows < 2 or jitter_ticks < 0 or ppm_limit <= 0:
@@ -230,6 +243,7 @@ def estimate_period(
 
 
 def main():
+    """Estimate a register period from PPS data and quality constraints."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("capture", type=Path)
     parser.add_argument("--nominal-ns", type=exact_decimal, default=Fraction(8))

@@ -16,6 +16,7 @@ from dma_workload import build_workload, exercise, export, verify_burst_shapes
 
 
 def axis_rows(emissions):
+    """Convert model packet emissions into canonical ordered stream capture rows."""
     return [
         f"{p.queue} {p.tag} {p.cookie} {beat.data:#x} {beat.keep:#x} "
         f"{int(beat.first)} {int(beat.last)}"
@@ -24,12 +25,14 @@ def axis_rows(emissions):
 
 
 def workload(seed, count, depth):
+    """Generate and exercise a reproducible seed and queue count for the test."""
     configs, entries = build_workload(seed,count,depth)
     return export(configs,entries,exercise(configs,entries,seed))
 
 
 class WorkloadContract(unittest.TestCase):
     def test_seeded_traffic_exercises_every_status_in_both_queues(self):
+        """Cover the seeded traffic exercises every status in both queues regression case."""
         for trial,depth in ((19,2),(823,4),(77,8)):
             doc = workload(trial,70,depth)
             self.assertEqual(doc["summary"]["completed"],140)
@@ -41,6 +44,7 @@ class WorkloadContract(unittest.TestCase):
             self.assertGreater(doc["summary"]["completion_capacity_blocked_edges"],1)
 
     def test_reproducible_json_and_concurrent_submission_seed(self):
+        """Cover the reproducible json and concurrent submission seed regression case."""
         a = workload(7,28,2)
         b = workload(7,28,2)
         self.assertEqual(a,b)
@@ -53,12 +57,14 @@ class WorkloadContract(unittest.TestCase):
             self.assertTrue(any(earlier>later for earlier,later in zip(counters,counters[1:])))
 
     def test_raises_for_unproductive_or_wrong_geometry(self):
+        """Cover the raises for unproductive or wrong geometry regression case."""
         with self.assertRaises(ValueError):
             build_workload(1,1,2)
         with self.assertRaises(ValueError):
             build_workload(1,25,6)
 
     def test_independent_ledger_for_axi_channel_errors(self):
+        """Cover the independent ledger for AXI channel errors regression case."""
         address=Access(0,Phase.PUSH,"AW",0x1000,0)
         valid_data=Access(0,Phase.PUSH,"W",0x1000,0x1234,0x03,True)
         b=Access(0,Phase.PUSH,"B",0x1000)
@@ -83,6 +89,7 @@ class WorkloadContract(unittest.TestCase):
 class CompletionAudit(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        """Generate one checked fixture shared by the capture-audit tests."""
         cls.configs,cls.entries=build_workload(21,35,4)
         cls.replay=exercise(cls.configs,cls.entries,21)
         cls.ledger=export(cls.configs,cls.entries,cls.replay)
@@ -90,6 +97,7 @@ class CompletionAudit(unittest.TestCase):
         cls.rows=axis_rows(cls.replay.model.emissions)
 
     def test_audit_exact_binary_completions_and_axis_rows(self):
+        """Cover the audit exact binary completions and axis rows regression case."""
         binary=[item.encode().hex() for item in self.values]
         results=compare(self.ledger,completion_rows(binary),assemble_stream(self.rows),
                         strict_schedule=True,check_clock=True)
@@ -99,6 +107,7 @@ class CompletionAudit(unittest.TestCase):
         self.assertEqual(results["error_completions"],self.replay.model.rejected)
 
     def test_compare_accepts_cross_queue_schedule_change_only_outside_strict_mode(self):
+        """Cover the compare accepts cross queue schedule change only outside strict mode regression case."""
         reorder=sorted(self.values,key=lambda record:record.queue,reverse=True)
         report=compare(self.ledger,reorder,assemble_stream(self.rows))
         self.assertEqual(report["queues"],[0,1])
@@ -106,6 +115,7 @@ class CompletionAudit(unittest.TestCase):
             compare(self.ledger,reorder,assemble_stream(self.rows),strict_schedule=True)
 
     def test_error_in_crc_tag_payload_or_identity_is_visible(self):
+        """Cover the error in CRC tag payload or identity is visible regression case."""
         altered=self.values.copy()
         altered[0]=replace(altered[0],crc=altered[0].crc^1)
         with self.assertRaisesRegex(AuditError,"completion .* mismatch"):
@@ -118,6 +128,7 @@ class CompletionAudit(unittest.TestCase):
             compare(self.ledger,self.values[:-1],data)
 
     def test_invalid_input_length_unrecognized_abi_and_backwards_time(self):
+        """Cover the invalid input length unrecognized abi and backwards time regression case."""
         with self.assertRaisesRegex(AuditError,"row 1"):
             list(completion_rows(["abcd"]))
         with self.assertRaisesRegex(AuditError,"unrecognized"):
@@ -128,6 +139,7 @@ class CompletionAudit(unittest.TestCase):
             monotonic_time([replace(ref,timestamp=123),replace(ref,timestamp=122)])
 
     def test_audit_cli_files_emit_measured_counts(self):
+        """Cover the audit cli files emit measured counts regression case."""
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)
             plan=path/"ledger.json"
@@ -147,6 +159,7 @@ class CompletionAudit(unittest.TestCase):
 
 class StreamAudit(unittest.TestCase):
     def test_packet_assembly_with_tail_lane_mask(self):
+        """Cover the packet assembly with tail lane mask regression case."""
         payload=b"123456789ABC"
         rows=[
             f"1 4 100 {beat.data:#x} {beat.keep:#x} {int(beat.first)} {int(beat.last)}"
@@ -156,6 +169,7 @@ class StreamAudit(unittest.TestCase):
         self.assertEqual(packet,PacketCapture(1,4,100,payload))
 
     def test_packet_assembly_rejects_mid_frame_metadata_and_format_changes(self):
+        """Cover the packet assembly rejects mid frame metadata and format changes regression case."""
         header="0 1 2 0x44332211 0xff 1 0"
         valid_end="0 1 2 0x00000044 0x01 0 1"
         problems=(

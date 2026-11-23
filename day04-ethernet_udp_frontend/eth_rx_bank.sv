@@ -145,6 +145,7 @@ module eth_rx_bank #(
         assign m_data[8*lane +: 8] = m_keep[lane] ? lane_word[8*lane +: 8] : 8'd0;
     end
 
+    // Mark the current receive result with the first validation error.
     task automatic reject(input logic [7:0] code);
         begin
             reason <= code;
@@ -152,6 +153,7 @@ module eth_rx_bank #(
         end
     endtask
 
+    // Return the packet bank to an idle state so the next frame can be captured.
     task automatic recycle;
         begin
             state             <= CAPTURE;

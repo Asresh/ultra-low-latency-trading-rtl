@@ -12,6 +12,7 @@ from capture_io import CaptureError, NANOSECOND, packets, packets_from, tick_per
 
 class ClassicCaptureTests(unittest.TestCase):
     def test_endian_and_time_precision(self):
+        """Check that endian and time precision."""
         for endian in ("<",">"):
             for rate in (1_000_000,NANOSECOND):
                 with self.subTest(endian=endian,rate=rate):
@@ -25,11 +26,13 @@ class ClassicCaptureTests(unittest.TestCase):
                     self.assertEqual(second.captured,b"xyz")
 
     def test_fcs_extension_leaves_dlt(self):
+        """Check that FCS extension leaves dlt."""
         data = pcap([(0,0,b"x"*60,60)],network=1+(1<<26)+(2<<28))
         pkt, = packets_from(io.BytesIO(data))
         self.assertEqual((pkt.fcs_bytes,pkt.link_type),(4,1))
 
     def test_bounded_read_errors(self):
+        """Check that bounded read errors."""
         good_data = pcap([(0,0,bytes(100),100)])
         cases = [
             (b"abcd","signature"),
@@ -47,6 +50,7 @@ class ClassicCaptureTests(unittest.TestCase):
             list(packets_from(io.BytesIO(good_data),limit=64))
 
     def test_files_are_closed_after_iteration(self):
+        """Check that files are closed after iteration."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/"fixture.pcap"
             path.write_bytes(pcap([(7,123,b"data",4)]))
@@ -56,6 +60,7 @@ class ClassicCaptureTests(unittest.TestCase):
 
 class NextGenerationTests(unittest.TestCase):
     def test_sections_reset_interfaces_and_byte_order(self):
+        """Check that sections reset interfaces and byte order."""
         little = section("<")+interface("<",name="lane-A")+enhanced("<",b"alpha",ticks=2_000_000)
         big = section(">")+interface(">",name="lane-B",scale=9)+enhanced(">",b"beta",ticks=19)
         records = list(packets_from(io.BytesIO(little+big)))
@@ -64,6 +69,7 @@ class NextGenerationTests(unittest.TestCase):
         self.assertEqual([record.capture_time_ns for record in records],[2*NANOSECOND,19])
 
     def test_multiple_interfaces_binary_scale_and_signed_offset(self):
+        """Check that multiple interfaces binary scale and signed offset."""
         first = interface("<",name="book",scale=0x80+10,offset=-3)
         second = interface("<",name="orders",scale=9,offset=3)
         enhanced_a = enhanced("<",b"1234",iface=0,ticks=874)
@@ -74,6 +80,7 @@ class NextGenerationTests(unittest.TestCase):
         self.assertEqual((a.name,b.name),("book","orders"))
 
     def test_simple_packet_saves_slice_and_has_no_time(self):
+        """Check that simple packet saves slice and has no time."""
         fixture = section()+interface(snap=5)+simple("<",b"abcde",wirelen=7)
         record, = packets_from(io.BytesIO(fixture))
         self.assertEqual(record.capture_time_ns,None)
@@ -81,6 +88,7 @@ class NextGenerationTests(unittest.TestCase):
         self.assertTrue(record.truncated)
 
     def test_interface_fcs_option_and_record_override(self):
+        """Check that interface FCS option and record override."""
         base = section()+interface(fcs=32,arbitrary=((199,b"unknown"),))
         a = enhanced("<",b"first")
         b = enhanced("<",b"second",flags=8<<5)
@@ -88,11 +96,13 @@ class NextGenerationTests(unittest.TestCase):
         self.assertEqual([record.fcs_bytes for record in records],[4,8])
 
     def test_unknown_blocks_skipped(self):
+        """Check that unknown blocks skipped."""
         fixture = section()+ng_block("<",937,b"opaque!!")+interface()+enhanced("<",b"stay")
         record, = packets_from(io.BytesIO(fixture))
         self.assertEqual(record.captured,b"stay")
 
     def test_container_faults_are_local_and_bounded(self):
+        """Check that container faults are local and bounded."""
         prefix = section()+interface()
         one_record = enhanced("<",b"abcd")
         cases = (
@@ -112,6 +122,7 @@ class NextGenerationTests(unittest.TestCase):
                 list(packets_from(io.BytesIO(contents)))
 
     def test_option_errors_include_invalid_lengths_and_repeated_keys(self):
+        """Check that option errors include invalid lengths and repeated keys."""
         raw_idb = struct.pack("<HHI",1,0,65535)
         raw_epb = struct.pack("<5I",0,0,0,0,0)
         cases = (
@@ -132,6 +143,7 @@ class NextGenerationTests(unittest.TestCase):
 
 class ClockArithmeticTests(unittest.TestCase):
     def test_period_is_rational_without_float_rounding(self):
+        """Check that period is rational without float rounding."""
         period = tick_period_ns(156_250_000)
         self.assertEqual((period.numerator,period.denominator),(32,5))
         with self.assertRaises(ValueError):

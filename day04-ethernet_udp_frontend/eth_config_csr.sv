@@ -85,6 +85,7 @@ module eth_config_csr (
         endcase
     end
 
+    // Register the bus status and data and move the CSR adapter to its response state.
     task automatic complete(input logic [1:0] code, input logic [31:0] value);
         begin
             rsp_status <= code;

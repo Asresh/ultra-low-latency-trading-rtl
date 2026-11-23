@@ -11,12 +11,14 @@ from dma_protocol import (
 
 
 def geometry(index=0, depth=8):
+    """Build the selected queue's nonoverlapping ring and payload regions."""
     base = index*0x10000
     return QueueConfig(Ring(base+0x1000,depth),Ring(base+0x2000,depth),
                        Region(base+0x3000,base+0x8000))
 
 
 def make_engine(faults=(), fill=0xa5, depth=8, timeout=6, seed=0, batch=0, delay=0):
+    """Build a test engine with configurable memory, DMA, and interrupt parameters."""
     model = Engine(Fabric(SparseMemory(fill),faults),capture_timeout=timeout)
     for i in (0,1):
         if not model.configure(i,geometry(i,depth),seed=seed,irq_batch=batch,irq_delay=delay):
@@ -26,6 +28,7 @@ def make_engine(faults=(), fill=0xa5, depth=8, timeout=6, seed=0, batch=0, delay
 
 class PublicationTests(unittest.TestCase):
     def test_cq_publication_waits_for_last_b_and_wraps_both_rings(self):
+        """Cover the CQ publication waits for last b and wraps both rings regression case."""
         model = make_engine(seed=U32_MASK)
         descriptor = Descriptor(Opcode.FENCE,tag=3,flags=FLAG_IRQ,cookie=0x55)
         self.assertTrue(model.host_post(0,descriptor))
@@ -47,6 +50,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(model.reap(0),[before.completion])
 
     def test_reap_and_submit_doorbell_is_atomic_when_one_field_illegal(self):
+        """Cover the reap and submit doorbell is atomic when one field illegal regression case."""
         model = make_engine(seed=U32_MASK-3,depth=4)
         queue = model.queues[0]
         for _ in range(3):
@@ -63,6 +67,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(queue.completion_count,0)
 
     def test_cq_full_blocks_one_lane_and_preserves_other_lane_progress(self):
+        """Cover the CQ full blocks one lane and preserves other lane progress regression case."""
         model = make_engine(depth=2)
         for index in (0,1,2):
             self.assertTrue(model.host_post(0,Descriptor(Opcode.FENCE,tag=index)))
@@ -83,6 +88,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual([item.tag for item in model.reap(1)],[99])
 
     def test_round_robin_alternates_eligible_queues(self):
+        """Cover the round robin alternates eligible queues regression case."""
         model = make_engine()
         for index in range(5):
             for lane in (0,1):
@@ -96,6 +102,7 @@ class PublicationTests(unittest.TestCase):
 
 class AxiFaultSemantics(unittest.TestCase):
     def test_failing_descriptor_read_completes_with_zero_identifier(self):
+        """Cover the failing descriptor read completes with zero identifier regression case."""
         error = AxiFault(Phase.DESCRIPTOR,AxiResponse.SLVERR,address=0x1010,queue=0)
         model = make_engine([error])
         model.host_post(0,Descriptor(Opcode.PULL,16,0x3000,0xbbbb,tag=0xaaaa))
@@ -109,6 +116,7 @@ class AxiFaultSemantics(unittest.TestCase):
         self.assertEqual(model.rejected,1)
 
     def test_malformed_rlast_is_fatal_in_descriptor_and_payload_phases(self):
+        """Cover the malformed RLAST is fatal in descriptor and payload phases regression case."""
         for phase,address in ((Phase.DESCRIPTOR,0x1000),(Phase.PULL,0x4000)):
             with self.subTest(phase=phase):
                 model = make_engine([AxiFault(phase,last=True,address=address)])
@@ -121,6 +129,7 @@ class AxiFaultSemantics(unittest.TestCase):
                 self.assertFalse(any(item.phase == Phase.COMPLETION for item in model.fabric.trace))
 
     def test_mid_data_rlast_absence_preempts_read_response_error(self):
+        """Cover the mid data RLAST absence preempts read response error regression case."""
         model = make_engine([AxiFault(Phase.PULL,AxiResponse.DECERR,address=0x4008,last=False)])
         model.host_post(0,Descriptor(Opcode.PULL,9,0x4000,cookie=1))
         self.assertIsNone(model.start())
@@ -128,6 +137,7 @@ class AxiFaultSemantics(unittest.TestCase):
         self.assertEqual(model.completed,0)
 
     def test_failed_second_push_b_keeps_prior_writes_and_reports_crc(self):
+        """Cover the failed second push b keeps prior writes and reports CRC regression case."""
         payload = bytes(index&255 for index in range(257))
         fault = AxiFault(Phase.PUSH,AxiResponse.SLVERR,address=0x4000)
         model = make_engine([fault])
@@ -145,6 +155,7 @@ class AxiFaultSemantics(unittest.TestCase):
         self.assertEqual(model.push_bytes,0)
 
     def test_cq_b_error_latches_fault_and_never_publishes_visibility(self):
+        """Cover the CQ b error latches fault and never publishes visibility regression case."""
         fault = AxiFault(Phase.COMPLETION,AxiResponse.DECERR,queue=1,apply_write=True)
         model = make_engine([fault],batch=1)
         model.host_post(1,Descriptor(Opcode.FENCE,flags=FLAG_IRQ,tag=33))
@@ -162,6 +173,7 @@ class AxiFaultSemantics(unittest.TestCase):
 
 class PayloadSemantics(unittest.TestCase):
     def test_tail_read_is_trimmed_before_crc_and_packet(self):
+        """Cover the tail read is trimmed before CRC and packet regression case."""
         payload = b"123456789"
         dma = make_engine()
         dma.fabric.memory.write(0x3ff8,payload+bytes([222])*7)
@@ -175,6 +187,7 @@ class PayloadSemantics(unittest.TestCase):
                          [0,0])
 
     def test_crc_errors_prevent_reads_from_crossing_into_endpoint_output_and_push_commits(self):
+        """Cover the CRC errors prevent reads from crossing into endpoint output and push commits regression case."""
         data = b"0123456789abcdefghijklm"
         model = make_engine()
         model.fabric.memory.write(0x3000,data)
@@ -192,6 +205,7 @@ class PayloadSemantics(unittest.TestCase):
         self.assertEqual(model.fabric.memory.read(0x3100,len(data)),bytes((0xa5,))*len(data))
 
     def test_capture_drains_bad_packet_or_times_out_without_writes(self):
+        """Cover the capture drains bad packet or times out without writes regression case."""
         good = tuple(packet_beats(b"0123456789abcdefg"))
         malformed = replace(good[0],keep=3)
         shapes = (
@@ -213,6 +227,7 @@ class PayloadSemantics(unittest.TestCase):
 
 class InterruptPolicy(unittest.TestCase):
     def test_batch_timer_and_immediate_modes(self):
+        """Cover the batch timer and immediate modes regression case."""
         policy = Irq(minimum_batch=3,maximum_delay=6)
         policy.edge(completion=True)
         self.assertEqual((policy.backlog,policy.elapsed,policy.request),(1,1,False))
@@ -229,6 +244,7 @@ class InterruptPolicy(unittest.TestCase):
         self.assertEqual((policy.backlog,policy.elapsed,policy.request),(1,1,True))
 
     def test_saturation_and_ack_independent_of_cq_head(self):
+        """Cover the saturation and ack independent of CQ head regression case."""
         model = make_engine()
         state = model.queues[0]
         for _ in range(350):

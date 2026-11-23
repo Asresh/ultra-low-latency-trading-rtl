@@ -53,6 +53,7 @@ module tb_ouch_order_session #(
         query_view, metrics
     };
 
+    // Generate the next deterministic state for the test's randomized choices.
     function automatic logic [31:0] advance(input logic [31:0] value);
         logic [31:0] x;
         begin
@@ -173,6 +174,7 @@ module tb_ouch_order_session #(
         end
     end
 
+    // Apply a synchronous reset and return the interface drivers to idle.
     task automatic reset_core;
         begin
             @(negedge clk);
@@ -182,6 +184,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Drive the link availability signal at the next safe edge.
     task automatic set_transport(input integer up);
         begin
             @(negedge clk);
@@ -190,6 +193,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Present one packed login request and wait for its input handshake.
     task automatic send_login(input logic [LOGIN_BITS-1:0] request);
         begin
             @(negedge clk);
@@ -201,6 +205,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Present one application command and wait until the session accepts it.
     task automatic send_command(input logic [CMD_BITS-1:0] command);
         begin
             @(negedge clk);
@@ -212,6 +217,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Hold one wire beat with its keep mask until RX accepts it.
     task automatic send_raw_beat(input logic [63:0] word_data, input logic [7:0] keep);
         begin
             @(negedge clk);
@@ -224,6 +230,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Fragment a byte stream into accepted RX beats for a frame sequence.
     task automatic send_byte_group(
         input logic [RAW_BITS-1:0] raw,
         input integer total,
@@ -256,6 +263,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Advance the fixture's heartbeat timer by the requested number of ticks.
     task automatic pulse_ticks(input integer count);
         begin
             for (integer i = 0; i < count; i = i + 1) begin
@@ -268,6 +276,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Drive local queries while ensuring a due heartbeat still gets transmitted.
     task automatic query_during_heartbeat(
         input logic [CMD_BITS-1:0] command, input integer ticks
     );
@@ -290,6 +299,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Pulse the enable-to-kill control at a defined edge.
     task automatic kill_once;
         begin
             @(negedge clk);
@@ -299,6 +309,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Request a logout and wait for the control input handshake.
     task automatic logout_once;
         begin
             @(negedge clk);
@@ -309,6 +320,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Apply transmit backpressure so a partial frame stays observable.
     task automatic throttle_tx(input integer beats);
         begin
             @(negedge clk);
@@ -316,6 +328,7 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    // Wait until the host has observed a prefix of an incomplete TX frame.
     task automatic wait_for_partial_tx;
         integer waited;
         begin
@@ -332,6 +345,7 @@ module tb_ouch_order_session #(
 
     integer stimulus_index = 0;
     integer barriers = 0;
+    // Compare stable checkpoint and order-slot state at a scenario barrier.
     task automatic inspect_barrier(
         input integer expected_tx_count, expected_notice_count,
         input logic [RAW_BITS-1:0] packed_expectation

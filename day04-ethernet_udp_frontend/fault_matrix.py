@@ -47,16 +47,19 @@ class Mutated:
 
 
 def changed(wire, offset, nbytes, value):
+    """Replace bytes at a selected offset without changing the original fixture."""
     return wire[:offset]+value.to_bytes(nbytes,"big")+wire[offset+nbytes:]
 
 
 def toggled(wire, offset, mask):
+    """Flip the requested bit in one byte of the existing wire image."""
     return changed(wire,offset,1,wire[offset]^mask)
 
 
 def mutate(packet, fault, rng):
     # Every byte mutation other than an intentional truncation begins with
     # a valid frame and keeps the lower-layer wire contract intact.
+    """Apply one labeled fault to the frame or its framing sidebands."""
     payload = packet.payload or b"\xc8"
     packet = replace(packet,payload=payload,udp_zero=False)
     l2 = packet.l2()
@@ -107,6 +110,7 @@ def mutate(packet, fault, rng):
 
 
 def observe(case, limit):
+    """Record the model's observed reject classification for a mutated frame."""
     raw,axis=from_beats(case.input_beats)
     if axis != Result.OK:
         return axis
@@ -114,6 +118,7 @@ def observe(case, limit):
 
 
 def sample(rng, packet_generator, count, limit):
+    """Choose repeatable cases spanning declared header and payload configurations."""
     if count < len(Fault):
         raise ValueError(f"at least {len(Fault)} samples are required to cover all faults")
     categories=list(Fault)

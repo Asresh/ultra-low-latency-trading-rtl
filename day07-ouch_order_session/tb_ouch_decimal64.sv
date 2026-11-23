@@ -34,6 +34,7 @@ module tb_ouch_decimal64;
         end
     end
 
+    // Drive a new decimal conversion request and leave its inputs sampled.
     task automatic start(
         input logic decode,
         input logic [63:0] number,
@@ -52,6 +53,7 @@ module tb_ouch_decimal64;
         end
     endtask
 
+    // Wait for the decimal converter to finish and check its result fields.
     task automatic convert(
         input logic decode,
         input logic [63:0] raw_number,
@@ -84,6 +86,7 @@ module tb_ouch_decimal64;
         end
     endtask
 
+    // Build the independent space-padded decimal representation for a tick.
     function automatic [159:0] print_value(input logic [63:0] number);
         string text;
         begin
@@ -93,6 +96,7 @@ module tb_ouch_decimal64;
         end
     endfunction
 
+    // Verify both decimal directions, including a stalled output handshake.
     task automatic round_trip(input logic [63:0] number, input integer holds);
         logic [159:0] canonical;
         begin
@@ -102,6 +106,7 @@ module tb_ouch_decimal64;
         end
     endtask
 
+    // Flush a partially completed decimal conversion at a chosen cycle.
     task automatic interrupt(input logic decode, input integer before_cycle);
         begin
             start(decode, 64'hffff_ffff_ffff_ffff, "18446744073709551615");
@@ -116,6 +121,7 @@ module tb_ouch_decimal64;
         end
     endtask
 
+    // Advance the deterministic pseudo-random sequence used as fixture data.
     function automatic [63:0] scramble(input logic [63:0] number);
         logic [63:0] x;
         begin

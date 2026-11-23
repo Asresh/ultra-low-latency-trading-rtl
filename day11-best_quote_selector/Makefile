@@ -1,0 +1,54 @@
+PYTHON ?= python3
+IVERILOG ?= iverilog
+VVP ?= vvp
+VERILATOR ?= verilator
+YOSYS ?= yosys
+TOP = best_quote_selector
+SOURCES = $(shell cat rtl.f)
+PROFILES = default solo odd wide
+IMAGES = $(addprefix build/,$(addsuffix .vvp,$(PROFILES)))
+
+.PHONY: test test-rtl test-python lint synth clean
+
+test: test-python test-rtl
+
+test-python:
+	$(PYTHON) -B -m unittest discover -v
+
+build:
+	mkdir -p $@
+
+build/%.vvp: $(SOURCES) quote_codes.svh tb_best_quote_selector.sv quote_schema.py quote_tool.py | build
+	$(IVERILOG) -g2012 -s tb_best_quote_selector `$(PYTHON) -B quote_tool.py parameters --profile $*` -o $@ -c rtl.f tb_best_quote_selector.sv
+
+build/rank.vvp: quote_reduce_side.sv tb_quote_reduce_side.sv | build
+	$(IVERILOG) -g2012 -s tb_quote_reduce_side -o $@ $^
+
+test-rtl: $(IMAGES) build/rank.vvp
+	$(VVP) build/rank.vvp
+	@set -e; for profile in $(PROFILES); do \
+		$(PYTHON) -B quote_tool.py regress --profile "$$profile" --image "build/$$profile.vvp" --vvp "$(VVP)" --output "build/regression/$$profile"; \
+	done
+
+lint:
+	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
+	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -GINSTRUMENTS=1 -GVENUES=1 -f rtl.f
+
+synth: | build
+	$(YOSYS) -Q -l build/synth.log -p 'read_verilog -sv $(SOURCES); hierarchy -check -top $(TOP); synth -top $(TOP) -noabc; check -assert; stat'
+
+clean:
+	rm -rf build obj_dir
+
+.PHONY: formal
+
+formal: | build
+	$(YOSYS) -Q -q -l build/formal-rank.log -p 'read_verilog -formal -sv quote_reduce_side.sv tb_quote_rank_formal.sv; hierarchy -check -top formal_quote_rank; proc; flatten; chformal -lower; opt; sat -prove-asserts -verify'
+	$(YOSYS) -Q -q -l build/formal-flow.log -p 'read_verilog -formal -sv $(SOURCES) tb_quote_flow_formal.sv; hierarchy -check -top formal_quote_flow; proc; flatten; memory_map; async2sync; chformal -lower; opt; sat -seq 7 -set-at 1 rst 1 -prove-asserts -verify'
+
+.PHONY: demo
+
+test: demo
+
+demo: build/default.vvp
+	$(PYTHON) -B quote_demo.py --image build/default.vvp --vvp "$(VVP)"

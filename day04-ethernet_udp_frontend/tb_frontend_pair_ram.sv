@@ -18,6 +18,7 @@ module tb_frontend_pair_ram;
     integer reads=0, writes=0, dual=0, wrapped=0, held=0, odd=0, even=0;
     integer cycle=0;
 
+    // Advance the seeded generator by one step for reproducible test patterns.
     function automatic logic [63:0] advance(input logic [63:0] value);
         logic [63:0] stage;
         begin
@@ -27,6 +28,7 @@ module tb_frontend_pair_ram;
         end
     endfunction
 
+    // Compute the adjacent address expected by the paired read.
     function automatic integer successor(input logic [ADDRESS_BITS-1:0] address);
         successor=(int'(address)+1)%DEPTH;
     endfunction
@@ -64,6 +66,7 @@ module tb_frontend_pair_ram;
                    cycle, read_address, read_pair, held_reference);
     end
 
+    // Write a distinct reference word to every RAM location.
     task automatic fill_all;
         begin
             for (integer address=0; address<DEPTH; address=address+1) begin
@@ -79,6 +82,7 @@ module tb_frontend_pair_ram;
         end
     endtask
 
+    // Check that both paired-read directions return the specified stored words.
     task automatic read_both_directions;
         begin
             for (integer index=0; index<DEPTH; index=index+1) begin

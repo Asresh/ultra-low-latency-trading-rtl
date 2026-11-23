@@ -28,6 +28,7 @@ module eth_rule_table (
     logic [31:0] actions;
     logic [7:0] hits;
 
+    // Compare two values only in the lanes whose mask bits are set.
     function automatic logic compare_masks(
         input logic [255:0] rule_with_unused_action,
         input logic [31:0] sip, input logic [31:0] dip,

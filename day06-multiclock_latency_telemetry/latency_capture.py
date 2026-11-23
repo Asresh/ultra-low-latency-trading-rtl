@@ -22,10 +22,12 @@ class CaptureError(ValueError):
 
 
 def bitfield(value, offset, width):
+    """Extract an unsigned field at a specific bit offset and width."""
     return (value >> offset) & ((1 << width) - 1)
 
 
 def read_words(stream, width, raw=False):
+    """Convert textual or binary capture input into checked fixed-width records."""
     nbytes = (width + 7) // 8
     if raw:
         index = 0
@@ -52,10 +54,12 @@ def read_words(stream, width, raw=False):
 
 class WordStream:
     def __init__(self, words):
+        """Wrap an iterator and track the word position for truncation messages."""
         self.words = iter(words)
         self.offset = 0
 
     def start(self):
+        """Read the first word of the next frame, or report clean end of stream."""
         try:
             word = next(self.words)
         except StopIteration:
@@ -64,6 +68,7 @@ class WordStream:
         return word
 
     def take(self, label):
+        """Consume a mandatory word or report a truncated frame."""
         value = self.start()
         if value is None:
             raise CaptureError(f"unexpected EOF while reading {label} at word {self.offset}")
@@ -72,15 +77,18 @@ class WordStream:
 
 class FrameSequence:
     def __init__(self, first_id):
+        """Set the first expected capture sequence ID when one was supplied."""
         self.next_id = first_id
 
     def consume(self, current):
+        """Check the sequence ID and advance the expected frame position."""
         if self.next_id is not None and current != self.next_id:
             raise CaptureError(f"frame sequence {current}, expected {self.next_id}")
         self.next_id = (current + 1) & LIMIT32
 
 
 def read_event(word):
+    """Decode and validate one packed event record."""
     status = Status(bitfield(word, 317, 3))
     if bitfield(word, 256, 21):
         raise CaptureError("nonzero reserved bits in event")
@@ -118,6 +126,7 @@ class HistogramClass:
     maximum: int
 
     def validate(self):
+        """Check the record for inconsistent fields before it can be encoded or consumed."""
         cap = (1 << self.counter_bits) - 1
         if self.count > cap or max(self.bucket_counts, default=0) > cap:
             raise CaptureError(f"class {self.number}: counter exceeds bit width")
@@ -142,6 +151,7 @@ class HistogramClass:
                 raise CaptureError(f"class {self.number}: sum is outside sample bounds")
 
     def percentile_interval(self, numerator, denominator=100):
+        """Locate the bucket bounds containing a rational cumulative rank."""
         if not 0 < numerator <= denominator:
             raise ValueError("quantile must be in (0, 1]")
         # Once either a bucket or the total saturates, rank is unknown.
@@ -157,11 +167,13 @@ class HistogramClass:
         raise CaptureError("histogram rank missing")
 
     def mean(self):
+        """Calculate the exact mean using the aggregate count and tick sum."""
         if self.count and not self.overflow:
             return Fraction(self.total, self.count)
         return None
 
     def summarize(self):
+        """Return count, range, moments and percentile information for this histogram."""
         mean = self.mean()
         return {
             "class": self.number,
@@ -193,6 +205,7 @@ class TraceFrame:
 
 
 def parse_histogram_class(stream, index, word):
+    """Read one class header and its complete set of bucket records."""
     if bitfield(word, 124, 4) != 1 or bitfield(word, 116, 8) != index:
         raise CaptureError(f"expected class {index} totals at word {stream.offset}")
     bin_count = bitfield(word, 108, 8)
@@ -226,6 +239,7 @@ def parse_histogram_class(stream, index, word):
 
 
 def histogram_frames(words, classes, first_id=0):
+    """Yield complete histogram frames and check their sequence and dimensions."""
     if not 1 <= classes <= 256:
         raise ValueError("histogram class count is outside 1..256")
     stream = WordStream(words)
@@ -250,6 +264,7 @@ def histogram_frames(words, classes, first_id=0):
 
 
 def trace_frames(words, first_id=0):
+    """Yield complete capture windows and reject missing or invalid framing."""
     stream = WordStream(words)
     sequence = FrameSequence(first_id)
     while True:
@@ -280,12 +295,14 @@ def trace_frames(words, first_id=0):
 
 
 def event_json(event):
+    """Convert a decoded event to fields suitable for a JSON report."""
     payload = asdict(event)
     payload["status"] = event.status.name
     return payload
 
 
 def format_histogram(frame, detailed):
+    """Render histogram metadata and optionally expand each bucket."""
     payload = {
         "frame": frame.frame_id,
         "cut_tick": frame.cut_tick,
@@ -298,6 +315,7 @@ def format_histogram(frame, detailed):
 
 
 def format_trace(frame):
+    """Render the trace window, trigger position and per-event fields."""
     return {
         "frame": frame.frame_id,
         "trigger_tick": frame.trigger_tick,
@@ -309,6 +327,7 @@ def format_trace(frame):
 
 
 def frame_id_value(raw):
+    """Parse a CLI frame ID subject to its on-wire bit width."""
     if raw == "any":
         return None
     number = int(raw, 0)
@@ -318,6 +337,7 @@ def frame_id_value(raw):
 
 
 def output_events(words, emit_csv, stream):
+    """Decode event lines and stream either CSV or JSON to the chosen sink."""
     writer = None
     count = 0
     for word in words:
@@ -334,6 +354,7 @@ def output_events(words, emit_csv, stream):
 
 
 def main():
+    """Decode a capture stream using the requested record format."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("format", choices=WORD_WIDTHS)
     parser.add_argument("capture", type=Path)

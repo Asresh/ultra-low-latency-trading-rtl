@@ -22,12 +22,20 @@ EXPANSION_PROJECTS = (
     "day07-ouch_order_session",
     "day08-host_dma_queues",
 )
-PROJECTS = LEGACY_PROJECTS + EXPANSION_PROJECTS
+BEGINNER_PROJECTS = (
+    "day10-stream_width_converter",
+    "day11-best_quote_selector",
+    "day12-message_rate_limiter",
+    "day13-timestamped_stream_replayer",
+    "day14-fixed_point_notional",
+)
+PROJECTS = LEGACY_PROJECTS + EXPANSION_PROJECTS + BEGINNER_PROJECTS
 BASELINE_COMMIT = "80c7c41209814901a715ce0ee029ee4868b742cf"
 IGNORED_DIRS = {"build", "obj_dir", "fixtures", "generated", "__pycache__"}
 
 
 def sv_code_lines(source):
+    """Count compilable text after removing SV line and block comments."""
     # Match strings as a unit so a literal URL or escaped quote survives.
     grammar = r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/'
     stripped = re.sub(
@@ -39,6 +47,7 @@ def sv_code_lines(source):
 
 
 def py_code_lines(source):
+    """Retain only lines carrying Python tokens outside docstrings."""
     prose = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and (
@@ -64,10 +73,12 @@ def py_code_lines(source):
 
 
 def source_lines(path, body):
+    """Select the appropriate lexical counting rule for the file's language."""
     return py_code_lines(body) if path.suffix == ".py" else sv_code_lines(body)
 
 
 def read_baseline(path):
+    """Retrieve the same named source from the original release, if unambiguous."""
     # Match the old flat filename even though the old layout had rtl/ and tb/.
     candidates = subprocess.check_output(
         ["git", "ls-tree", "-r", "--name-only", BASELINE_COMMIT], cwd=ROOT, text=True
@@ -82,6 +93,7 @@ def read_baseline(path):
 
 
 def file_role(path):
+    """Count implementation separately from testbenches, formal, and host tools."""
     if ("formal" in path.parts or path.suffix == ".py" or path.name.startswith("tb_")
             or path.stem.endswith("_tb")):
         return "verification"
@@ -89,6 +101,7 @@ def file_role(path):
 
 
 def collect(project, compare):
+    """Walk one project and total handwritten RTL and verification source."""
     counts = {"rtl": 0, "verification": 0, "added": 0}
     for path in sorted((ROOT / project).rglob("*")):
         if path.suffix not in {".sv", ".svh", ".v", ".vh", ".py"}:
@@ -107,6 +120,7 @@ def collect(project, compare):
 
 
 def main():
+    """Print the source inventory and fail if an enabled line floor is unmet."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--minimum", type=int, default=0, help="require this many source lines per project")
     parser.add_argument("--compare", action="store_true", help="compare same-name files at the original release")
@@ -130,7 +144,7 @@ def main():
         print(row + (f" {counts['added']} |" if args.compare else ""))
         minimum = args.minimum
         if args.enforce:
-            floor = 5001 if project in EXPANSION_PROJECTS else 2000
+            floor = 2000 if project in LEGACY_PROJECTS else 5001
             minimum = max(floor, minimum)
         if total < minimum:
             below.append(f"{project} ({total} < {minimum})")

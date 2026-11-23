@@ -62,6 +62,7 @@ class Key(NamedTuple):
 
 
 def bits_for(n: int) -> int:
+    """Return the index width for n alternatives, retaining a bit for a single item."""
     return max(1, (n - 1).bit_length())
 
 
@@ -79,30 +80,37 @@ class Profile:
 
     @property
     def notional_bits(self) -> int:
+        """Size the notional field for the configured policy arithmetic."""
         return self.price_bits + self.qty_bits
 
     @property
     def max_notional(self) -> int:
+        """Return the largest notional value that the profile can represent."""
         return (1 << self.notional_bits) - 1
 
     @property
     def max_price(self) -> int:
+        """Return the greatest unsigned price that fits the profile."""
         return (1 << self.price_bits) - 1
 
     @property
     def max_qty(self) -> int:
+        """Return the greatest unsigned quantity that fits the profile."""
         return (1 << self.qty_bits) - 1
 
     @property
     def last_generation(self) -> int:
+        """Return the final generation value before the slot must stop being reused."""
         return (1 << self.generation_bits) - 1
 
     @property
     def last_event(self) -> int:
+        """Return the reserved terminal sequence number for an order lifecycle."""
         return (1 << self.event_bits) - 1
 
     @property
     def response_widths(self) -> tuple[int, ...]:
+        """List the audit decision field widths in packed wire order."""
         return (
             3, self.tag_bits, bits_for(self.accounts), bits_for(self.instruments),
             1, bits_for(self.slots), self.generation_bits, self.event_bits, 5, 1,
@@ -112,6 +120,7 @@ class Profile:
 
     @property
     def response_bits(self) -> int:
+        """Count the bits in one complete packed audit decision."""
         return sum(self.response_widths)
 
 
@@ -131,6 +140,7 @@ class Policy:
     max_open_orders: int
 
     def is_active(self, max_slots: int) -> bool:
+        """Reject disabled policies and inconsistent limits before installing them."""
         return (
             bool(self.enable)
             and 0 < self.min_price <= self.max_price
@@ -155,9 +165,11 @@ class Request:
 
     @property
     def key(self) -> Key:
+        """Group account, instrument, and side into the request's ownership key."""
         return Key(self.account, self.instrument, self.sell)
 
     def is_well_formed(self, op: Operation) -> bool:
+        """Check the request fields used or reserved by the selected operation."""
         if op is Operation.NEW:
             return self.generation == self.event == 0 and self.price > 0 and self.qty > 0
         if op in (Operation.FILL, Operation.AMEND):
@@ -178,10 +190,12 @@ class OpenOrder:
 
     @property
     def reserved(self) -> int:
+        """Compute open limit-price notional from the remaining quantity."""
         return self.price * self.qty
 
     @property
     def live(self) -> bool:
+        """Treat an order as live only while its remaining quantity is positive."""
         return self.qty > 0
 
 
@@ -206,6 +220,7 @@ class Decision:
 
     @classmethod
     def from_wire_fields(cls, values: list[int]) -> Decision:
+        """Create a decision from an ordered list after checking the field count."""
         if len(values) != len(fields(cls)):
             raise ValueError(f"expected {len(fields(cls))} decision fields, got {len(values)}")
         return cls(*values)
@@ -215,16 +230,19 @@ class GatewayModel:
     """Replay old generations safely and maintain session realized notional."""
 
     def __init__(self, profile: Profile):
+        """Store the selected wire geometry and initialize an empty trading session."""
         self.profile = profile
         self.reset()
 
     def reset(self) -> None:
+        """Drop all orders, policies, realized activity, and the halt flag."""
         self.orders: dict[int, OpenOrder] = {}
         self.policies: dict[Key, Policy] = {}
         self.executed: dict[Key, int] = {}
         self.halted = False
 
     def valid_key(self, key: Key) -> bool:
+        """Check that all account, instrument, and side indexes are implemented."""
         return (
             0 <= key.account < self.profile.accounts
             and 0 <= key.instrument < self.profile.instruments
@@ -232,6 +250,7 @@ class GatewayModel:
         )
 
     def write_policy(self, key: Key, policy: Policy) -> None:
+        """Install an active policy or remove a disabled one for a valid key."""
         if self.valid_key(key):
             if policy.is_active(self.profile.slots):
                 self.policies[key] = policy
@@ -239,6 +258,7 @@ class GatewayModel:
                 self.policies.pop(key, None)
 
     def open_orders(self, key: Key) -> list[OpenOrder]:
+        """Collect only live slots owned by this account, instrument, and side."""
         return [
             order
             for order in self.orders.values()
@@ -246,11 +266,13 @@ class GatewayModel:
         ]
 
     def ledger(self, key: Key) -> tuple[int, int, int]:
+        """Recompute open notional and count from orders and include realized notional."""
         orders = self.open_orders(key)
         open_amount = sum(order.reserved for order in orders)
         return open_amount, self.executed.get(key, 0), len(orders)
 
     def check_admission(self, req: Request, delta_open: int, delta_count: int) -> Status:
+        """Check halt and policy, then apply proposed exposure and order-count deltas."""
         if self.halted:
             return Status.HALTED
         policy = self.policies.get(req.key)
@@ -268,6 +290,7 @@ class GatewayModel:
         return Status.OK
 
     def _new(self, req: Request, old: OpenOrder | None) -> Status:
+        """Allocate the next slot generation if the previous slot is free and the new order fits."""
         if old is not None and old.live:
             return Status.SLOT_BUSY
         previous_generation = old.generation if old is not None else 0
@@ -280,6 +303,7 @@ class GatewayModel:
         return code
 
     def _fill(self, req: Request, prior: OpenOrder) -> Status:
+        """Apply a correctly sequenced fill and latch halt if execution notional would overflow."""
         if req.qty > prior.qty:
             return Status.OVERFILL
         if req.event == self.profile.last_event and req.qty < prior.qty:
@@ -295,6 +319,7 @@ class GatewayModel:
         return Status.OK
 
     def _reconcile(self, op: Operation, req: Request, prior: OpenOrder | None) -> Status:
+        """Fence wrong owners and stale events before modifying an existing order."""
         if prior is None or not prior.live:
             return Status.NOT_LIVE
         if prior.key != req.key:
@@ -321,6 +346,7 @@ class GatewayModel:
         return code
 
     def _commit_request(self, req: Request) -> Status:
+        """Check operation, key, slot, and field validity before dispatching the state transition."""
         try:
             op = Operation(req.op)
         except ValueError:
@@ -339,6 +365,7 @@ class GatewayModel:
         return self._reconcile(op, req, old)
 
     def transact(self, req: Request) -> Decision:
+        """Apply one request and return the resulting slot and ledger visible to its owner."""
         code = self._commit_request(req)
         visible = self.orders.get(req.slot)
         if visible is not None and visible.key != req.key:
@@ -358,6 +385,7 @@ class GatewayModel:
 
 
 def checked_row(values: tuple[int, ...], widths: tuple[int, ...], label: str) -> None:
+    """Validate each value against its field width before writing a simulator row."""
     if len(values) != len(widths):
         raise ValueError(f"{label} has {len(values)} fields, expected {len(widths)}")
     for offset, (value, width) in enumerate(zip(values, widths)):
@@ -366,6 +394,7 @@ def checked_row(values: tuple[int, ...], widths: tuple[int, ...], label: str) ->
 
 
 def encode_reply(profile: Profile, decision: Decision) -> int:
+    """Pack a response from most significant field to least significant field."""
     values = astuple(decision)
     checked_row(values, profile.response_widths, f"decision #{decision.tag}")
     packed = 0
@@ -375,6 +404,7 @@ def encode_reply(profile: Profile, decision: Decision) -> int:
 
 
 def decode_reply(profile: Profile, packed: int) -> Decision:
+    """Unpack the fixed-width audit payload and rebuild its original field order."""
     if not 0 <= packed < 1 << profile.response_bits:
         raise ValueError("audit payload exceeds decision width")
     values = []
@@ -388,6 +418,7 @@ class Scenario:
     """Record checked vector rows and the expected decisions in issue order."""
 
     def __init__(self, profile: Profile):
+        """Initialize the reference gateway, vector buffers, and coverage counters."""
         self.profile = profile
         self.model = GatewayModel(profile)
         self.stimulus: list[tuple[int, ...]] = []
@@ -397,11 +428,13 @@ class Scenario:
         self.tag = 0
 
     def _event(self, kind: Action, *payload: int) -> None:
+        """Pad an action to the fixed simulator record width."""
         if len(payload) > 10:
             raise ValueError("stimulus payload exceeds the fixed vector row")
         self.stimulus.append((kind, *payload, *([0] * (10 - len(payload)))))
 
     def configure(self, key: Key, policy: Policy) -> None:
+        """Update model configuration and record the corresponding wire action."""
         prof = self.profile
         payload = (*key, *astuple(policy))
         checked_row(
@@ -415,14 +448,17 @@ class Scenario:
         self._event(Action.CONFIG, *payload)
 
     def halt(self) -> None:
+        """Set the modeled halt flag and add a halt signal to the stimulus."""
         self.model.halted = True
         self._event(Action.HALT)
 
     def reset(self) -> None:
+        """Clear model session state and add a reset action to the stimulus."""
         self.model.reset()
         self._event(Action.RESET)
 
     def drain(self) -> None:
+        """Ask the driver to empty its pending interfaces before sending more actions."""
         self._event(Action.DRAIN)
 
     def order(
@@ -430,6 +466,7 @@ class Scenario:
         event: int = 0, price: int = 0, qty: int = 0,
         expected: Status | None = None,
     ) -> Decision:
+        """Create a tagged request and append the modeled result to the expected scoreboard."""
         p = self.profile
         req = Request(op, self.tag, *key, slot, generation, event, price, qty)
         self.tag += 1
@@ -450,6 +487,7 @@ class Scenario:
         return reply
 
     def write(self, output: Path) -> None:
+        """Write width-checked stimulus, reply rows, and packed audit expectations."""
         output.mkdir(parents=True, exist_ok=True)
         with (output / "stimulus.txt").open("w", encoding="ascii") as vectors:
             for row in self.stimulus:

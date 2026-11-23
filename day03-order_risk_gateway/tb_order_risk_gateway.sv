@@ -94,6 +94,7 @@ module tb_order_risk_gateway #(
         .m_first(stream_first), .m_last(stream_last)
     );
 
+    // Step the seeded random source used to vary bench handshakes.
     function automatic logic [31:0] advance_random(input logic [31:0] x);
         logic [31:0] next;
         begin
@@ -126,6 +127,7 @@ module tb_order_risk_gateway #(
     logic [63:0] p_code, p_live, p_qty, p_limit, p_res, p_open, p_exec, p_count;
     integer result_cols;
 
+    // Compare one delivered decision with the next expected risk reply row.
     task automatic compare_next_reply;
         begin
             result_cols = $fscanf(expected,
@@ -230,6 +232,7 @@ module tb_order_risk_gateway #(
     integer action, columns;
     string vector_dir;
 
+    // Offer the next generated order request and wait for acceptance.
     task automatic push_order;
         begin
             @(negedge clk);
@@ -250,6 +253,7 @@ module tb_order_risk_gateway #(
         end
     endtask
 
+    // Drive an indexed policy write while preserving ordering with the request stream.
     task automatic change_policy;
         begin
             @(negedge clk);
@@ -269,6 +273,7 @@ module tb_order_risk_gateway #(
         end
     endtask
 
+    // Wait for all outstanding generated responses and audit records to transfer.
     task automatic drain;
         begin
             do @(negedge clk); while (!cfg_ready || !audit_in_ready || audit_record_valid);
@@ -277,6 +282,7 @@ module tb_order_risk_gateway #(
         end
     endtask
 
+    // Assert the emergency stop on a sampled edge before issuing later requests.
     task automatic halt_session;
         begin
             drain();
@@ -289,6 +295,7 @@ module tb_order_risk_gateway #(
         end
     endtask
 
+    // Assert reset and check that pending requests and outputs are discarded.
     task automatic reset_session;
         begin
             drain();

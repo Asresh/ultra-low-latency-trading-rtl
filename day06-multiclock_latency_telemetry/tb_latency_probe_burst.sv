@@ -44,10 +44,12 @@ module tb_latency_probe_burst;
         end
     end
 
+    // Generate a reproducible tag that distinguishes probes and event indices.
     function automatic logic [TW-1:0] tag_for(input integer lane, input integer index);
         tag_for = TW'((index * 37) ^ (lane * 623));
     endfunction
 
+    // Assign a probe event to its deterministic test group.
     function automatic logic [GROUP_W-1:0] group_for(input integer index);
         group_for = GROUP_W'(index ^ (index >> 4));
     endfunction

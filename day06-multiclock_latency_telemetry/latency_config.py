@@ -36,6 +36,7 @@ class ConfigError(ValueError):
 
 
 def parse_integer(options, key, maximum):
+    """Read and validate a bounded integer option before encoding bus data."""
     data = options.get(key, 0)
     if type(data) is not int or not 0 <= data <= maximum:
         raise ConfigError(f"{key} must be an unsigned integer <= {maximum}")
@@ -43,6 +44,7 @@ def parse_integer(options, key, maximum):
 
 
 def parse_flag(options, key, default=False):
+    """Read a Boolean setting and apply its documented default if absent."""
     data = options.get(key, default)
     if type(data) is not bool:
         raise ConfigError(f"{key} must be a JSON boolean")
@@ -50,6 +52,7 @@ def parse_flag(options, key, default=False):
 
 
 def reject_unknown(options, known):
+    """Reject unrecognized settings so misspellings cannot silently change a plan."""
     if not isinstance(options, dict):
         raise ConfigError("expected an object")
     extras = sorted(options.keys() - known)
@@ -67,23 +70,27 @@ class Bus:
 
     @classmethod
     def write(cls, offset, value, enables=15):
+        """Construct a register write with validated address, value and byte lanes."""
         if offset & 3 or not 0 <= value < 1 << 32 or not 1 <= enables <= 15:
             raise ConfigError("AXI write exceeds register geometry")
         return cls("write", offset, value, 0, enables)
 
     @classmethod
     def poll(cls, offset, mask, want):
+        """Construct a read-until-match operation using masked expected bits."""
         if offset & 3 or not 0 < mask < 1 << 32 or want & ~mask:
             raise ConfigError("invalid poll mask or comparison")
         return cls("poll", offset, want, mask)
 
     @classmethod
     def read(cls, offset):
+        """Construct a checked read from the requested register offset."""
         if offset & 3:
             raise ConfigError("AXI read must be word-aligned")
         return cls("read", offset)
 
     def json(self):
+        """Encode the bus operation as a plain object for a host-side executor."""
         record = {"op": self.operation, "addr": f"0x{self.offset:03x}"}
         if self.operation == "write":
             record.update({"data": f"0x{self.value:08x}", "wstrb": f"0x{self.strobes:x}"})
@@ -93,6 +100,7 @@ class Bus:
 
 
 def pair_words(low_offset, high_offset, value):
+    """Split one wide value into little-endian low and high register writes."""
     return [Bus.write(low_offset, value & 0xFFFFFFFF), Bus.write(high_offset, value >> 32)]
 
 
@@ -106,6 +114,7 @@ class TraceConfiguration:
 
     @classmethod
     def from_mapping(cls, options, depth):
+        """Construct a validated typed record from external field names and values."""
         reject_unknown(options, {"enable", "post", "threshold_ticks", "statuses", "arm"})
         enable = parse_flag(options, "enable", default=True)
         post = parse_integer(options, "post", depth-1)
@@ -125,6 +134,7 @@ class TraceConfiguration:
         return cls(enable, post, threshold, status_values, arm)
 
     def bus_words(self):
+        """Pack checked trace settings into the device's register representation."""
         mask = sum(1 << status for status in self.statuses)
         control = (int(self.enable) << 16) | (self.post << 8) | mask
         return [
@@ -134,6 +144,7 @@ class TraceConfiguration:
 
 
 def synthesize_plan(options, trace_depth=16):
+    """Compile user settings into ordered bus operations, with capture quiesced during changes."""
     keys = {"period_ns", "timeout_ticks", "armed", "quiesce", "flush",
             "clear_counts", "snapshot", "latch_clock", "trace"}
     reject_unknown(options, keys)
@@ -198,6 +209,7 @@ def synthesize_plan(options, trace_depth=16):
 
 
 def main():
+    """Validate a configuration file and emit the register plan."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("config", type=Path, help="JSON fixture")
     parser.add_argument("--trace-depth", type=int, default=16)

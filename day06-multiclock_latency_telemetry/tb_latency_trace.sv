@@ -26,11 +26,13 @@ module tb_latency_trace;
     logic [321:0] pending;
     integer seen = 0;
 
+    // Build the complete expected trace record for this fixture ID.
     function automatic logic [319:0] make_payload(input integer id);
         make_payload = 320'({32'(id),32'(id + 700),32'hd54f8129,
                              32'(id - 90),32'(id * 151),32'(id * 37)});
     endfunction
 
+    // Pack the expected trace header, including sequence and trigger metadata.
     function automatic logic [319:0] make_header(
         input integer frame, input integer id, input integer count, input integer offset,
         input logic [2:0] cause, input logic high
@@ -39,6 +41,7 @@ module tb_latency_trace;
                        8'(offset), cause, high, 12'd0};
     endfunction
 
+    // Arm the recorder and wait until capture has begun.
     task automatic start_recording;
         begin
             @(negedge clk);
@@ -49,6 +52,7 @@ module tb_latency_trace;
         end
     endtask
 
+    // Submit one event and its timestamp to the trace recorder.
     task automatic insert(
         input integer index, input logic [2:0] status, input logic [63:0] delay
     );
@@ -64,6 +68,7 @@ module tb_latency_trace;
         end
     endtask
 
+    // Populate the scoreboard with the expected trace header and records.
     task automatic set_expected(
         input integer frame, input integer first, input integer last, input integer trigger,
         input logic [2:0] status, input logic high
@@ -77,6 +82,7 @@ module tb_latency_trace;
         end
     endtask
 
+    // Accept a complete report while verifying its frame boundaries.
     task automatic drain;
         begin
             if (!frozen || armed) $fatal(1, "Trace did not freeze");

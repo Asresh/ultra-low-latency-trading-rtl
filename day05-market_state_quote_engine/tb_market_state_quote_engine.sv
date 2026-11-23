@@ -87,6 +87,7 @@ module tb_market_state_quote_engine #(
             end
         end
 
+        // Recompute visible order aggregates and check the instrument table invariants.
         task automatic verify_tables;
             logic [DEPTH_W-1:0] sums [0:1][0:LEVELS-1];
             integer counts [0:1][0:LEVELS-1], best [0:1];
@@ -152,6 +153,7 @@ module tb_market_state_quote_engine #(
         endtask
     end
 
+    // Record one cycle of observed stream and state pins for the oracle.
     task automatic write_trace(input integer trace_fd, input integer cycle);
         $fwrite(trace_fd, "%0d %0d %0d %0d %0d %0d %0d ",
             cycle, rst, tick, s_valid, s_ready, r_ready, q_ready);
@@ -181,6 +183,7 @@ module tb_market_state_quote_engine #(
         $fdisplay(trace_fd, "");
     endtask
 
+    // Apply one decoded command field group to the stimulus pins.
     task automatic drive_fields(
         input integer bank, op, seq, id, new_id, side, price, qty, stat_index, tag
     );
@@ -196,6 +199,7 @@ module tb_market_state_quote_engine #(
         s_tag = TAG_W'(tag);
     endtask
 
+    // Read a cycle-exact stimulus file and record the matching hardware trace.
     task automatic exact_cycle_vectors(input string input_path, input string output_path);
         integer input_fd, output_fd, row, cycle, tokens;
         integer reset_in, tick_in, response_ready_in, quote_ready_in, input_valid;

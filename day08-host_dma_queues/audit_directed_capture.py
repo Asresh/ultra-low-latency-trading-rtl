@@ -9,6 +9,7 @@ from dma_audit import assemble_stream, compare, completion_rows
 
 
 def stimulus_bytes(seed, length):
+    """Build the independently generated seeded byte sequence read by the DMA."""
     mask = (1 << 32) - 1
     output = bytearray()
     for index in range(length):
@@ -20,10 +21,12 @@ def stimulus_bytes(seed, length):
 
 def completion_hex(queue, status, opcode, tag, length, cookie, crc=0):
     # Encode from byte offsets independently of the host ABI classes.
+    """Pack the expected CQ record into little-endian hex for comparison."""
     return pack("<IHBBQ3xBIQ", length, tag, opcode, status, cookie, queue, crc, 0).hex()
 
 
 def directed_fixture():
+    """Return the acceptance and payload expectations for the directed run."""
     transmitted = stimulus_bytes(1331, 139)
     received = stimulus_bytes(722, 129)
     bad_crc = stimulus_bytes(14, 29)
@@ -59,6 +62,7 @@ def directed_fixture():
 
 
 def verify(directory):
+    """Check captured data against the independent reference for this scenario."""
     ledger = directed_fixture()
     with (directory / "completions.hex").open() as completions:
         with (directory / "packets.txt").open() as packets:

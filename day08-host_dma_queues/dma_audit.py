@@ -14,6 +14,7 @@ class AuditError(ValueError):
 
 
 def hex_bytes(raw,label):
+    """Decode a hexadecimal capture field while retaining errors with its label."""
     if not isinstance(raw,str):
         raise AuditError(f"{label} must contain hexadecimal text")
     try:
@@ -26,6 +27,7 @@ def hex_bytes(raw,label):
 
 
 def completion_rows(raw):
+    """Parse little-endian completion records and report invalid row numbers."""
     for index,line in enumerate(raw,1):
         try:
             record = Completion.decode(hex_bytes(line.rstrip(),"completion"))
@@ -42,6 +44,7 @@ class PacketCapture:
     payload: bytes
 
     def __post_init__(self):
+        """Validate the packet's queue identity, tag, cookie and payload type."""
         bounded(self.queue,8,"packet queue")
         bounded(self.tag,16,"packet tag")
         bounded(self.cookie,64,"packet cookie")
@@ -50,13 +53,16 @@ class PacketCapture:
 
     @classmethod
     def from_object(cls,row):
+        """Normalize a capture record from its input object representation."""
         return cls(row["queue"],row["tag"],row["cookie"],hex_bytes(row["payload"],"payload"))
 
     def identity(self):
+        """Return the queue, tag, cookie and payload identity used for comparison."""
         return self.queue,self.tag,self.cookie
 
 
 def to_int(value,bits,label):
+    """Parse a capture field and reject values outside its declared bit width."""
     if isinstance(value,int):
         return bounded(value,bits,label)
     try:
@@ -67,6 +73,7 @@ def to_int(value,bits,label):
 
 
 def assemble_stream(rows):
+    """Rebuild complete packets from framed stream rows with byte masks."""
     active = None
     data = bytearray()
     for number,row in enumerate(rows,1):
@@ -97,6 +104,7 @@ def assemble_stream(rows):
 
 
 def ordered_by_queue(records):
+    """Partition records by queue without changing order within each queue."""
     result = defaultdict(list)
     for entry in records:
         result[entry.queue].append(entry)
@@ -104,6 +112,7 @@ def ordered_by_queue(records):
 
 
 def monotonic_time(records):
+    """Check completion timestamps increase in modular half-range order."""
     for a,b in zip(records, records[1:]):
         if (b.timestamp-a.timestamp)&U64_MASK >= 1<<63:
             raise AuditError("completion timestamps run backward outside modular half range")
@@ -111,6 +120,7 @@ def monotonic_time(records):
 
 def compare(expected_document,actual_completions,actual_packets, *, strict_schedule=False,
             check_clock=False):
+    """Check captured packets and completions against generated expectations."""
     if expected_document.get("format") != "host_dma_audit_v1":
         raise AuditError("unrecognized expected ledger format")
     expected = tuple(completion_rows(expected_document["expected_completions"]))
@@ -156,6 +166,7 @@ def compare(expected_document,actual_completions,actual_packets, *, strict_sched
 
 
 def main():
+    """Compare an actual DMA capture with the specified workload expectations."""
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("ledger",type=Path)
     ap.add_argument("completions",type=Path,help="each row is one 32-byte little-endian record")

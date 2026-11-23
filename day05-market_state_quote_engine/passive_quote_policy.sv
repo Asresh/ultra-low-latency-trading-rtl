@@ -76,6 +76,7 @@ module passive_quote_policy #(
     wire signed [CALC_W-1:0] passive_ceiling = signed_ask - CALC_W'(1);
     wire signed [CALC_W-1:0] passive_floor = signed_bid + CALC_W'(1);
 
+    // Convert a scaled fixed-point price to the configured tick-price grid.
     function automatic signed [CALC_W-1:0] to_grid(input signed [CALC_W-1:0] price);
         if (price < 0)
             to_grid = '0;

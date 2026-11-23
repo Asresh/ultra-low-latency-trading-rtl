@@ -104,6 +104,7 @@ module tb_multiclock_latency_telemetry;
         end
     end
 
+    // Delay and then drive AW until the AXI address handshake succeeds.
     task automatic drive_address(input logic [11:0] addr, input integer delay);
         begin
             repeat (delay) @(negedge ref_clk);
@@ -115,6 +116,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Delay and then drive W until AXI accepts the data and byte strobes.
     task automatic drive_write(input logic [31:0] value, input logic [3:0] mask, input integer delay);
         begin
             repeat (delay) @(negedge ref_clk);
@@ -127,6 +129,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Issue independently skewed AW and W handshakes and check the write response.
     task automatic write_register(
         input logic [11:0] addr,
         input logic [31:0] data,
@@ -153,6 +156,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Read an AXI-Lite register and check the response through a stall.
     task automatic read_register(
         input logic [11:0] addr,
         input logic [1:0] status,
@@ -179,6 +183,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Hold one probe observation stable until its per-clock input accepts it.
     task automatic observe(
         input integer lane, input logic [15:0] tag,
         input logic [1:0] event_class, input logic ending
@@ -196,6 +201,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Wait for the indexed report and compare its status and tags.
     task automatic expect_report(
         input integer index, input logic [2:0] code,
         input logic [15:0] tag, input logic [7:0] event_class
@@ -216,6 +222,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Toggle the asynchronous PPS input for one directed measurement.
     task automatic pulse;
         begin
             @(negedge ref_clk);
@@ -226,6 +233,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Accept the histogram snapshot while checking complete output delivery.
     task automatic drain_histogram;
         begin
             while (!hist_valid) @(negedge ref_clk);
@@ -240,6 +248,7 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Release the trace sink and wait for the expected record count.
     task automatic drain_trace;
         begin
             while (!trace_valid) @(negedge ref_clk);

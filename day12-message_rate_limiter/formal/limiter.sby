@@ -1,0 +1,24 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode prove
+safety: depth 16
+cover: mode cover
+cover: depth 14
+
+[engines]
+safety: abc pdr
+cover: smtbmc boolector
+
+[script]
+plugin -i slang
+safety: read_slang --top formal_limiter rate_refill.sv message_rate_limiter.sv formal_limiter.sv
+cover: read_slang --top formal_limiter -D COVER rate_refill.sv message_rate_limiter.sv formal_limiter.sv
+prep -top formal_limiter
+
+[files]
+../rate_refill.sv
+../message_rate_limiter.sv
+formal_limiter.sv

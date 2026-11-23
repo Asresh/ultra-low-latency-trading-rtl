@@ -92,6 +92,7 @@ module tb_dma_contention;
     integer wait_b_cycles, rejected_reconfigure_busy, malformed_layouts, retired_by_queue [0:QUEUES-1];
     logic [31:0] rng = 32'h764c_e229;
 
+    // Choose a repeatable pseudo-random integer below the given limit.
     function automatic integer draw(input integer limit);
         rng = rng ^ (rng << 13);
         rng = rng ^ (rng >> 17);
@@ -99,18 +100,22 @@ module tb_dma_contention;
         return int'(rng % $unsigned(limit));
     endfunction
 
+    // Offset a queue's seeded absolute cursor, including across 32-bit wrap.
     function automatic logic [31:0] position(input integer queue_id, input integer offset);
         return seed[queue_id] + 32'(offset);
     endfunction
 
+    // Map the key or absolute queue cursor into the appropriate table slot.
     function automatic integer index_of(input integer queue_id, input integer offset);
         return int'(position(queue_id, offset) & 32'(DEPTH-1));
     endfunction
 
+    // Calculate the selected generation's SQ or CQ base address.
     function automatic logic [63:0] layout(input integer queue_id, input integer generation, input bit cq);
         return 64'(4096*(queue_id+1) + 256*(generation%3+1) + 1024*int'(cq));
     endfunction
 
+    // Check that two half-open address ranges are disjoint.
     function automatic bit nonoverlap(
         input logic [63:0] first_start, first_size, second_start, second_size
     );
@@ -118,6 +123,7 @@ module tb_dma_contention;
                ({1'b0, second_start}+65'(second_size) <= {1'b0, first_start});
     endfunction
 
+    // Check the proposed ring bases, size, aperture, and range ordering.
     function automatic bit geometry_good;
         logic [64:0] upper_sq, upper_cq;
         upper_sq = {1'b0,cfg_submission_base}+65'(DEPTH*32);
@@ -130,11 +136,13 @@ module tb_dma_contention;
             nonoverlap(cfg_completion_base, 64'(DEPTH*32), cfg_payload_low, cfg_payload_high-cfg_payload_low);
     endfunction
 
+    // Report whether this queue has work and room for its completion.
     function automatic bit queue_eligible(input integer queue_id);
         return enabled[queue_id] && produced[queue_id] != retired[queue_id] &&
             retired[queue_id]-reclaimed[queue_id] < DEPTH;
     endfunction
 
+    // Reset independently tracked queue, scheduler, and interrupt state.
     task automatic reset_oracle;
         token = 0;
         active = -1;
@@ -171,6 +179,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Compare exposed queue state and counters with the scoreboard.
     task automatic inspect_and_check;
         integer q;
         q = int'(inspect_queue);
@@ -204,6 +213,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Predict which eligible queue should win the next scheduler grant.
     task automatic choose_work;
         integer winner, candidate, slot;
         winner = -1;
@@ -237,6 +247,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Record the selected descriptor and its expected AXI addresses.
     task automatic start_descriptor(input integer winner);
         expected_ar = submission[winner] + 64'(32*index_of(winner,retired[winner]));
         expected_aw = completion[winner] + 64'(32*index_of(winner,retired[winner]));
@@ -247,6 +258,7 @@ module tb_dma_contention;
         started++;
     endtask
 
+    // Check every memory handshake against the expected descriptor or CQ access.
     task automatic validate_axi;
         logic [63:0] wanted;
         if (!busy && (arvalid || awvalid || wvalid || bready || rready))
@@ -299,6 +311,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Advance the predicted absolute cursors only after completion writeback.
     task automatic retire_descriptor;
         integer slot;
         slot = index_of(active, retired[active]);
@@ -317,6 +330,7 @@ module tb_dma_contention;
         active = -1;
     endtask
 
+    // Model one queue's IRQ timer, acknowledgment and optional retirement.
     task automatic advance_interrupt(input integer q, input bit did_retire, input bit reconfigured);
         bit force_tick, reaches_batch, reaches_timer, old_irq;
         old_irq = irq_model[q];
@@ -348,6 +362,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Check accepted or rejected doorbells and update the independent queue model.
     task automatic check_host_transfer;
         integer q, posted, consumed;
         q = int'(host_queue);
@@ -378,6 +393,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Check configuration validity and record the queue that was reconfigured.
     task automatic check_config_transfer(output integer reconfigured);
         integer q;
         q = int'(cfg_queue);
@@ -440,6 +456,7 @@ module tb_dma_contention;
             inspect_queue <= Q_W'(steps % (QUEUES+1));
     end
 
+    // Present one complete config transaction and wait for its acknowledgment.
     task automatic configure_queue(
         input integer q, input bit enable, input integer generation, input logic [31:0] start,
         input integer batch, input integer delay_cycles, input integer malformed, input bit expect_ok
@@ -472,6 +489,7 @@ module tb_dma_contention;
         cfg_valid = 1'b0;
     endtask
 
+    // Drive one doorbell request with absolute submit and release cursors.
     task automatic bell(
         input integer q, input logic [31:0] sq, cq, input bit expect_ok
     );
@@ -489,6 +507,7 @@ module tb_dma_contention;
         host_valid = 1'b0;
     endtask
 
+    // Initialize memory with complete FENCE descriptors for a chosen queue.
     task automatic create_fences(
         input integer q, input integer entries, input bit immediate_first
     );
@@ -514,16 +533,19 @@ module tb_dma_contention;
         end
     endtask
 
+    // Stage additional FENCE descriptors and ring the submit doorbell.
     task automatic add_work(input integer q, input integer entries, input bit force_first);
         @(negedge clk);
         create_fences(q,entries,force_first);
         bell(q,position(q,produced[q]+entries),position(q,reclaimed[q]),1'b1);
     endtask
 
+    // Release completed entries by moving the model CQ head through a doorbell.
     task automatic reap(input integer q, input integer count);
         bell(q,position(q,produced[q]),position(q,reclaimed[q]+count),1'b1);
     endtask
 
+    // Wait for the specified retired count and fail on a stalled engine.
     task automatic wait_retired(input integer target);
         integer prior;
         prior = steps;
@@ -533,6 +555,7 @@ module tb_dma_contention;
             $fatal(1,"expected exactly %0d cumulative retirements, found %0d",target,completed);
     endtask
 
+    // Acknowledge a single queue interrupt without changing CQ ownership.
     task automatic ack_one(input integer q);
         @(negedge clk);
         irq_ack[q] = 1'b1;
@@ -559,6 +582,7 @@ module tb_dma_contention;
         end
     end
 
+    // Fill a CQ deliberately and observe credit backpressure.
     task automatic direct_completion_credit;
         block_read_address = 1'b1;
         block_write_response = 1'b1;
@@ -599,6 +623,7 @@ module tb_dma_contention;
             reap(q,retired[q]-reclaimed[q]);
     endtask
 
+    // Ensure a selected hold condition prevents premature progress.
     task automatic check_blocked;
         integer prior, receipts;
         prior = int'(completed);
@@ -610,6 +635,7 @@ module tb_dma_contention;
         end
     endtask
 
+    // Check that a simultaneous reconfiguration takes priority over a doorbell.
     task automatic config_doorbell_priority;
         // The old no-op doorbell is legal before a rebase. It must wait
         // through the configuration edge and then be checked in the new
@@ -648,6 +674,7 @@ module tb_dma_contention;
         bell(1,position(1,0),position(1,0),1'b1);
     endtask
 
+    // Run directed configuration and queue wraparound cases.
     task automatic management_cases;
         for (integer failure = 1; failure <= 4; failure++)
             configure_queue(0,1'b1,1,32'd100,3,0,failure,1'b0);
@@ -668,6 +695,7 @@ module tb_dma_contention;
         configure_queue(0,1'b1,1,32'hffff_fffd,3,0,0,1'b1);
     endtask
 
+    // Drive repeatable mixed queue and host traffic for the requested run length.
     task automatic run_random(input integer iterations);
         integer q, action, credit, available, amount;
         automatic_irqs = 1'b1;
@@ -706,6 +734,7 @@ module tb_dma_contention;
         drain_all();
     endtask
 
+    // Release blocked credits and prove all expected work eventually retires.
     task automatic drain_all;
         integer start_cycle;
         bit remaining;

@@ -46,12 +46,14 @@ class AxiResponse(IntEnum):
 
 
 def bounded(value, bits, label):
+    """Check integer field width before packing the descriptor or command."""
     if not isinstance(value, int) or not 0 <= value < 1<<bits:
         raise ValueError(f"{label} must fit in unsigned {bits} bits")
     return value
 
 
 def packed_fields(*fields):
+    """Combine unsigned fields from most to least significant position."""
     image = 0
     for field,width in fields:
         image = (image << width) | bounded(field,width,"packed field")
@@ -59,20 +61,24 @@ def packed_fields(*fields):
 
 
 def round_beats(byte_count):
+    """Calculate the number of aligned bus beats required for this byte count."""
     if byte_count < 0:
         raise ValueError("negative byte count")
     return (byte_count+LANES-1)//LANES
 
 
 def rounded(byte_count):
+    """Return the transfer footprint rounded up to a whole beat."""
     return round_beats(byte_count)*LANES
 
 
 def crc32(data):
+    """Calculate the Ethernet-style IEEE CRC over the active payload bytes."""
     return zlib.crc32(data)&U32_MASK
 
 
 def add_pointer(counter, increment=1):
+    """Advance an absolute ring cursor modulo 2^32."""
     bounded(counter,32,"ring pointer")
     if increment < 0:
         raise ValueError("ring pointer cannot move backwards")
@@ -80,6 +86,7 @@ def add_pointer(counter, increment=1):
 
 
 def distance(newer, older):
+    """Return the modulo-2^32 distance between two absolute ring cursors."""
     bounded(newer,32,"newer ring pointer")
     bounded(older,32,"older ring pointer")
     return (newer-older)&U32_MASK
@@ -91,18 +98,22 @@ class Region:
     stop: int
 
     def __post_init__(self):
+        """Require a positive, nonwrapping half-open address interval."""
         bounded(self.start,64,"region start")
         if not self.start < self.stop <= 1<<64:
             raise ValueError("invalid half-open address bounds")
 
     def contains(self, address, size):
+        """Check whether the entire byte span fits inside this half-open region."""
         return size >= 0 and self.start <= address <= self.stop and address+size <= self.stop
 
     def overlaps(self, other):
+        """Check whether the two half-open address intervals share any byte."""
         return self.start < other.stop and other.start < self.stop
 
     @property
     def size(self):
+        """Return the number of bytes in this configured memory range."""
         return self.stop-self.start
 
 
@@ -112,6 +123,7 @@ class Ring:
     entries: int
 
     def __post_init__(self):
+        """Check the ring's power-of-two depth, alignment and address bounds."""
         if self.entries < 2 or self.entries >= 1<<31 or self.entries & (self.entries-1):
             raise ValueError("ring depth must be a power of two in the monotonic counter half range")
         bounded(self.base,64,"ring base")
@@ -121,10 +133,12 @@ class Ring:
             raise ValueError("ring footprint wraps the physical address space")
 
     def address(self, index):
+        """Translate an absolute ring position into the corresponding byte address."""
         bounded(index,32,"ring index")
         return self.base+(index & (self.entries-1))*RECORD_BYTES
 
     def live(self, producer, consumer):
+        """Check and return occupied entries between the two wrapped cursors."""
         occupancy = distance(producer,consumer)
         if occupancy > self.entries:
             raise ValueError(f"pointer distance {occupancy} exceeds ring depth {self.entries}")
@@ -132,9 +146,11 @@ class Ring:
 
     @property
     def region(self):
+        """Return the full half-open memory region occupied by the ring."""
         return Region(self.base,self.base+self.entries*RECORD_BYTES)
 
     def spans(self, begin, count):
+        """Enumerate slot addresses for consecutive absolute positions, including wrap."""
         bounded(begin,32,"first counter")
         if not 0 <= count <= self.entries:
             raise ValueError("ring span count exceeds depth")
@@ -148,6 +164,7 @@ class QueueConfig:
     aperture: Region
 
     def __post_init__(self):
+        """Check queue ID, ring geometry and nonoverlapping address regions."""
         if self.aperture.stop > U64_MASK:
             raise ValueError("exclusive DMA aperture bound must fit in 64 bits")
         if self.aperture.start%LANES or self.aperture.stop%LANES:
@@ -170,6 +187,7 @@ class Descriptor:
     reserved: int = 0
 
     def __post_init__(self):
+        """Check descriptor fields fit their on-wire widths."""
         for value, width, name in (
             (self.op,8,"opcode"),(self.length,32,"payload length"),(self.address,64,"DMA address"),
             (self.cookie,64,"cookie"),(self.flags,8,"flags"),(self.tag,16,"tag"),
@@ -179,22 +197,27 @@ class Descriptor:
 
     @property
     def check_crc(self):
+        """Return the descriptor flag that enables a payload CRC check."""
         return bool(self.flags & FLAG_CRC)
 
     @property
     def immediate_irq(self):
+        """Return the descriptor flag that bypasses IRQ moderation."""
         return bool(self.flags & FLAG_IRQ)
 
     def words(self):
+        """Return the protocol record as fixed-width little-endian bus words."""
         first = packed_fields((self.op,8),(self.flags,8),(self.tag,16),(self.length,32))
         fourth = packed_fields((self.reserved,32),(self.expected_crc,32))
         return (first,self.address,self.cookie,fourth)
 
     def encode(self):
+        """Serialize the validated protocol record into its exact wire layout."""
         return RING_RECORD.pack(*self.words())
 
     @classmethod
     def from_words(cls, words):
+        """Decode a descriptor from the expected fixed-width word sequence."""
         first, address, cookie, fourth = words
         return cls(first>>56,length=first&U32_MASK,address=address,cookie=cookie,
                    flags=(first>>48)&255,tag=(first>>32)&65535,
@@ -202,11 +225,13 @@ class Descriptor:
 
     @classmethod
     def decode(cls, data):
+        """Validate the byte size and unpack the protocol record by field."""
         if len(data) != RECORD_BYTES:
             raise ValueError("descriptor must contain exactly 32 bytes")
         return cls.from_words(RING_RECORD.unpack(data))
 
     def validate(self, aperture):
+        """Check the record for inconsistent fields before it can be encoded or consumed."""
         if self.flags & ~VALID_FLAGS or self.reserved or (self.expected_crc and not self.check_crc):
             return Status.BAD_DESC
         if self.op == Opcode.FENCE:
@@ -233,6 +258,7 @@ class Completion:
     timestamp: int
 
     def __post_init__(self):
+        """Check response fields and lengths fit the completion record geometry."""
         Status(self.status)
         for value,width,label in (
             (self.op,8,"opcode"),(self.tag,16,"tag"),(self.length,32,"byte count"),
@@ -245,21 +271,25 @@ class Completion:
 
     @classmethod
     def of_descriptor(cls, descriptor, queue, status, timestamp, computed_crc=0):
+        """Construct a completion while preserving the descriptor identity and status."""
         byte_count = descriptor.length if status == Status.OK else 0
         reported_crc = computed_crc if status in (Status.OK,Status.CRC_ERROR,Status.WRITE_ERROR) else 0
         return cls(status,descriptor.op,descriptor.tag,byte_count,descriptor.cookie,reported_crc,
                    queue,timestamp)
 
     def words(self):
+        """Return the protocol record as fixed-width little-endian bus words."""
         first = packed_fields((self.status,8),(self.op,8),(self.tag,16),(self.length,32))
         third = packed_fields((self.crc,32),(self.queue,8),(0,24))
         return first,self.cookie,third,self.timestamp
 
     def encode(self):
+        """Serialize the validated protocol record into its exact wire layout."""
         return RING_RECORD.pack(*self.words())
 
     @classmethod
     def decode(cls, data):
+        """Validate the byte size and unpack the protocol record by field."""
         if len(data) != RECORD_BYTES:
             raise ValueError("completion must contain exactly 32 bytes")
         first, cookie, third, timestamp = RING_RECORD.unpack(data)
@@ -269,6 +299,7 @@ class Completion:
                    cookie,third>>32,(third>>24)&255,timestamp)
 
     def matches(self, other, *, compare_time=True):
+        """Compare captured completion fields, optionally masking volatile information."""
         if compare_time:
             return self == other
         return self.words()[:3] == other.words()[:3]
@@ -280,6 +311,7 @@ class Burst:
     beats: int
 
     def __post_init__(self):
+        """Require an aligned nonempty AXI burst inside a single 4 KiB page."""
         bounded(self.address,64,"AXI burst address")
         if self.address%LANES or not 1 <= self.beats <= MAX_AXI_BEATS:
             raise ValueError("unaligned or oversize burst")
@@ -290,18 +322,22 @@ class Burst:
 
     @property
     def axlen(self):
+        """Encode beat count as the AXI burst length field."""
         return self.beats-1
 
     @property
     def byte_count(self):
+        """Return the complete bus footprint represented by this burst."""
         return self.beats*LANES
 
     def addresses(self):
+        """Enumerate beat addresses in their required increasing bus order."""
         for index in range(self.beats):
             yield self.address+index*LANES
 
 
 def burst_plan(address, length):
+    """Partition a rounded AXI transfer at the burst size and page boundaries."""
     bounded(address,64,"transfer address")
     if address%LANES or length < 0:
         raise ValueError("DMA needs a beat-aligned start and nonnegative length")
@@ -325,20 +361,24 @@ class Beat:
     last: bool
 
     def __post_init__(self):
+        """Check the AXI payload width, mask and packet marker types."""
         bounded(self.data,64,"stream data")
         bounded(self.keep,8,"stream keep")
 
     @property
     def payload(self):
+        """Return the payload bytes selected by the validated keep mask."""
         if self.keep == 0 or self.keep & (self.keep+1):
             raise ValueError(f"bad contiguous keep 0x{self.keep:02x}")
         return self.data.to_bytes(LANES,"little")[:len(bin(self.keep))-2]
 
     def as_tuple(self):
+        """Return a stable tuple of stream beat fields for fixture comparison."""
         return self.data,self.keep,int(self.first),int(self.last)
 
 
 def packet_beats(data):
+    """Split bytes into stream beats and set the markers for a complete packet."""
     if not data:
         raise ValueError("empty body has no stream representation")
     for offset in range(0,len(data),LANES):
@@ -348,6 +388,7 @@ def packet_beats(data):
 
 
 def collect_packet(beats, length, timed_out=False):
+    """Validate a sequence of captured beats and reconstruct the complete packet."""
     received = bytearray()
     for i, beat in enumerate(beats):
         if beat.first != (i == 0):
@@ -369,6 +410,7 @@ def collect_packet(beats, length, timed_out=False):
 
 
 def write_beat_payload(data, burst, data_offset):
+    """Build AXI write data and strobe masks for one planned burst."""
     for index,address in enumerate(burst.addresses()):
         start = data_offset+index*LANES
         chunk = data[start:start+LANES]

@@ -47,6 +47,7 @@ AUTH = Login(b"DEMO  ", b"wiretest  ", BLANK_SESSION, 1)
 
 class MessageChecks(unittest.TestCase):
     def rejects(self, code: Status, operation, *args) -> DecodeError:
+        """Assert that a deliberately invalid codec operation reports the requested status."""
         with self.assertRaises(DecodeError) as captured:
             operation(*args)
         self.assertEqual(captured.exception.status, code)
@@ -55,6 +56,7 @@ class MessageChecks(unittest.TestCase):
 
 class GoldenWireTests(MessageChecks):
     def test_login_wire_fields(self):
+        """Cover the login wire fields regression case."""
         wire = bytes.fromhex("00344c") + (
             b"DEMO  wiretest  " + (b" " * 29) + b"1" + b"05000"
         )
@@ -66,6 +68,7 @@ class GoldenWireTests(MessageChecks):
         self.assertEqual(decode_peer(unframe(accept)), ("A", accept[3:]))
 
     def test_enter_wire_fixed_value_and_field_sentinels(self):
+        """Cover the enter wire fixed value and field sentinels regression case."""
         frame = bytes.fromhex(
             "0030 554f 01020304 42 0000002b 4d4f434b2e412020 0000000001020304"
             " 3059504e4e 5452414345312020202020202020 0000"
@@ -77,6 +80,7 @@ class GoldenWireTests(MessageChecks):
         self.assertEqual(decode_client(unframe(frame)), ("U", enter))
 
     def test_replace_wire_fixed_value_and_replacement_identity(self):
+        """Cover the replace wire fixed value and replacement identity regression case."""
         frame = bytes.fromhex(
             "0029 5555 fabcde10 fabcde11 00010008 0000000030112233 334e4e"
             " 5452414345312020202020202020 0000"
@@ -87,6 +91,7 @@ class GoldenWireTests(MessageChecks):
         self.assertEqual(decode_client(unframe(frame)), ("U", order))
 
     def test_cancel_wire_full_and_partial_sizes(self):
+        """Cover the cancel wire full and partial sizes regression case."""
         full = ClientOrder("X", 0xABCDEF12, 0)
         reduce = replace(full, quantity=0x4321)
         self.assertEqual(full.encode(), b"\x00\x0aUX\xab\xcd\xef\x12\0\0\0\0")
@@ -96,6 +101,7 @@ class GoldenWireTests(MessageChecks):
         self.rejects(Status.OUCH_APPENDAGE, decode_outbound, body + b"\0\x01")
 
     def test_big_endian_execution_and_reject_reason(self):
+        """Cover the big endian execution and reject reason regression case."""
         exec_hex = bytes.fromhex(
             "0025 5345 010204080f102040 89abcdef 0000c331 0000000055727374"
             " 41 1122334455667788 0000"
@@ -110,6 +116,7 @@ class GoldenWireTests(MessageChecks):
         self.assertEqual(decode_venue(explicit.payload()), explicit)
 
     def test_replaced_ack_addresses_previous_before_current_key(self):
+        """Cover the replaced ack addresses previous before current key regression case."""
         ack = VenueEvent("U", 11, 0x110001EF, 0xF189B1FE, 71, 120000, SYMBOL, ID, "S", "L", 234567)
         raw = ack.payload()
         self.assertEqual(len(raw), 68)
@@ -120,6 +127,7 @@ class GoldenWireTests(MessageChecks):
 
 class CodecRejectionTests(MessageChecks):
     def setUp(self):
+        """Build fresh codec fixture state for each test case."""
         self.timeout = AUTH.timeout
         self.enter = ClientOrder("O", 3, 20, 114_000, side="B",
                                  symbol=SYMBOL, tif="0", display="Y", client_id=ID)
@@ -127,6 +135,7 @@ class CodecRejectionTests(MessageChecks):
                                 symbol=SYMBOL, client_id=ID, side="B", state="L", venue=13)
 
     def test_every_login_format_error_excludes_secrets(self):
+        """Cover the every login format error excludes secrets regression case."""
         for field, value in [
             ("username", b" D    "), ("username", b"\xffA    "), ("username", b"abc"),
             ("password", b"DE MO     "), ("password", b"\0A        "),
@@ -141,6 +150,7 @@ class CodecRejectionTests(MessageChecks):
         self.rejects(Status.FRAME_LENGTH, decode_login_request, b"X" * 50)
 
     def test_nonnegative_decimal_and_overflow_properties(self):
+        """Cover the nonnegative decimal and overflow properties regression case."""
         generator = random.Random(0x1563)
         for number in [0, 1, 10, 99, 10 ** 19, MAX_SEQUENCE, MAX_SEQUENCE - 1] + \
                       [generator.randrange(MAX_SEQUENCE + 1) for _ in range(450)]:
@@ -157,6 +167,7 @@ class CodecRejectionTests(MessageChecks):
             self.rejects(Status.LOGIN_TEXT, parse_decimal, invalid)
 
     def test_exact_length_fences_for_required_appendages(self):
+        """Cover the exact length fences for required appendages regression case."""
         for sample in [
             self.fixed,
             replace(self.fixed, kind="U", prev=2),
@@ -172,6 +183,7 @@ class CodecRejectionTests(MessageChecks):
             self.assertEqual(decode_venue(payload), sample)
 
     def test_optional_length_requires_whole_short_or_explicit_zero(self):
+        """Cover the optional length requires whole short or explicit zero regression case."""
         for sample in [
             VenueEvent("C", 10, 3, quantity=5, reason=0x56),
             VenueEvent("P", 11, 3),
@@ -187,6 +199,7 @@ class CodecRejectionTests(MessageChecks):
             self.rejects(Status.OUCH_APPENDAGE, decode_venue, payload + b"\0\x02")
 
     def test_unsupported_client_settings_and_packet_type(self):
+        """Cover the unsupported client settings and packet type regression case."""
         raw = unframe(self.enter.encode()).payload
         self.rejects(Status.BAD_FIELDS, decode_outbound, raw[:28] + b"R" + raw[29:])
         self.rejects(Status.BAD_FIELDS, decode_outbound, raw[:29] + b"Y" + raw[30:])
@@ -200,6 +213,7 @@ class CodecRejectionTests(MessageChecks):
         self.rejects(Status.FRAME_LENGTH, decode_client, Envelope("R", b"1"))
 
     def test_text_fields_have_explicit_boundaries(self):
+        """Cover the text fields have explicit boundaries regression case."""
         for symbol in (b"ALFA    ", b"Z09.A   ", b"A1234567"):
             self.assertTrue(valid_symbol(symbol))
         for symbol in (b" ALFA   ", b"AL FA   ", b"alfa    ", b"A\xff      ", b"        "):
@@ -216,6 +230,7 @@ class CodecRejectionTests(MessageChecks):
 
 class StreamBoundaryTests(MessageChecks):
     def test_offset_monotonicity_every_simple_fragmentation(self):
+        """Cover the offset monotonicity every simple fragmentation regression case."""
         models = [
             Envelope("+", b"hello"),
             Envelope("H", b""),
@@ -235,6 +250,7 @@ class StreamBoundaryTests(MessageChecks):
                 self.assertEqual(list(take_frames(io.BytesIO(wire), size)), expected)
 
     def test_randomized_coalescing_with_very_short_and_maximum_packets(self):
+        """Cover the randomized coalescing with very short and maximum packets regression case."""
         rng = random.Random(9134)
         messages = [
             Envelope("+" if i % 2 else "S", bytes(rng.randrange(256) for _ in range(i % MAX_BODY)))
@@ -253,6 +269,7 @@ class StreamBoundaryTests(MessageChecks):
             self.assertEqual(completed, messages)
 
     def test_late_bad_header_preserves_all_previous_frames_and_offset(self):
+        """Cover the late bad header preserves all previous frames and offset regression case."""
         parser = SoupStream()
         kept = control("H") + control("+", b"x")
         with self.assertRaises(StreamDecodeError) as captured:
@@ -269,6 +286,7 @@ class StreamBoundaryTests(MessageChecks):
         self.rejects(Status.FRAME_LENGTH, next, iterator)
 
     def test_truncated_eof_fences_every_byte_boundary(self):
+        """Cover the truncated EOF fences every byte boundary regression case."""
         frame = Envelope("+", bytes(range(MAX_BODY - 1))).frame()
         for cut in range(1, len(frame)):
             reader = SoupStream()

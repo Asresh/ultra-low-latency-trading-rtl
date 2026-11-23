@@ -95,6 +95,7 @@ SNAPSHOT_WIDTHS = (
 
 
 def integer(field: bytes | str | int) -> int:
+    """Convert a protocol field to the unsigned integer used by the fixture."""
     if isinstance(field, bytes):
         return int.from_bytes(field, "big")
     if isinstance(field, str):
@@ -105,6 +106,7 @@ def integer(field: bytes | str | int) -> int:
 
 
 def pack(values: Iterable[bytes | str | int], widths: tuple[int, ...]) -> int:
+    """Serialize the record fields in their declared bit positions."""
     fields = list(values)
     if len(fields) != len(widths):
         raise ValueError(f"packed {len(fields)} values for a {len(widths)}-field record")
@@ -118,6 +120,7 @@ def pack(values: Iterable[bytes | str | int], widths: tuple[int, ...]) -> int:
 
 
 def unpack(value: int, widths: tuple[int, ...]) -> list[int]:
+    """Extract packed fields in their declared width and order."""
     if value < 0 or value.bit_length() > sum(widths):
         raise ValueError("packed value exceeds the schema width")
     parts = []
@@ -143,6 +146,7 @@ class Command:
     client_id: bytes = b""
 
     def client_message(self) -> ClientOrder:
+        """Return the normalized client order represented by this command."""
         if self.kind == CommandKind.ENTER:
             kind = "O"
         elif self.kind == CommandKind.REPLACE:
@@ -155,6 +159,7 @@ class Command:
                            self.symbol, self.tif, self.display, self.client_id)
 
     def pack(self) -> int:
+        """Serialize the record fields in their declared bit positions."""
         return pack(astuple(self), COMMAND_WIDTHS)
 
 
@@ -176,6 +181,7 @@ class Notice:
     reason: int = 0
 
     def pack(self) -> int:
+        """Serialize the record fields in their declared bit positions."""
         return pack(astuple(self), NOTICE_WIDTHS)
 
 
@@ -196,20 +202,24 @@ class Order:
 
     @property
     def pending(self) -> Pending:
+        """Return whether an in-flight request still owns this order slot."""
         if self.outstanding is None:
             return Pending.NONE
         return Pending(self.outstanding.kind + 1)
 
     @property
     def next_ref(self) -> int:
+        """Choose the proposed replacement reference when one is pending."""
         if self.pending == Pending.REPLACE and self.outstanding is not None:
             return self.outstanding.ref
         return 0
 
     def close(self) -> Order:
+        """Mark the order terminal and discard pending operation metadata."""
         return replace(self, live=False, leaves=0, outstanding=None)
 
     def slot_fields(self) -> tuple:
+        """Expose a slot's lifecycle and order fields for checkpoint comparison."""
         return (
             self.live, self.pending, self.ref, self.next_ref, self.leaves, self.total_filled,
             self.limit, self.symbol, self.venue, self.last_match or 0, self.ident, self.side, self.tag,
@@ -229,12 +239,14 @@ class Metrics:
     client_heartbeats: int = 0
 
     def add(self, name: str) -> None:
+        """Increment the named saturating diagnostic counter."""
         prior = getattr(self, name)
         setattr(self, name, min(MAX_U32, prior + 1))
 
 
 class OrderStore:
     def __init__(self, slots: int):
+        """Initialize a bounded slot table with empty order and reference state."""
         if not 1 <= slots <= 255:
             raise ValueError("slot capacity is outside 1..255")
         self.capacity = slots
@@ -242,22 +254,27 @@ class OrderStore:
         self.high_water = 0
 
     def view(self, slot: int) -> Order:
+        """Return a stable inspection of the selected order slot."""
         return self.orders.get(slot, Order())
 
     @property
     def live_count(self) -> int:
+        """Count order slots currently eligible for live-reference lookup."""
         return sum(order.live for order in self.orders.values())
 
     @property
     def pending_count(self) -> int:
+        """Count operations still waiting for a terminal venue response."""
         return sum(order.pending != Pending.NONE for order in self.orders.values())
 
     @staticmethod
     def _positive_limit(price: int) -> bool:
+        """Check that a limit price is in the nonzero supported range."""
         return 0 < price <= MAX_PRICE
 
     @staticmethod
     def _valid_order(order: Command) -> bool:
+        """Check the required price, quantity and protocol fields for a new order."""
         return (
             0 < order.price <= MAX_PRICE
             and 0 < order.quantity <= MAX_SHARES
@@ -267,6 +284,7 @@ class OrderStore:
         )
 
     def _open(self, order: Order, cmd: Command) -> tuple[Status, Order]:
+        """Admit an enter command while enforcing slot, reference and field checks."""
         if order.live or order.pending != Pending.NONE:
             return Status.SLOT_BUSY, order
         if cmd.ref <= self.high_water:
@@ -279,6 +297,7 @@ class OrderStore:
         )
 
     def _modify(self, order: Order, cmd: Command) -> tuple[Status, Order]:
+        """Validate a cancel or replacement against the live order and current pending state."""
         if not order.live:
             return Status.NO_ORDER, order
         if order.pending != Pending.NONE:
@@ -296,6 +315,7 @@ class OrderStore:
 
     @staticmethod
     def _retry(order: Order, cmd: Command, admission: Status) -> tuple[Status, bytes]:
+        """Distinguish exact pending retransmissions from conflicting command retries."""
         pending = order.outstanding
         if pending is None:
             return Status.NO_RETRY, b""
@@ -308,6 +328,7 @@ class OrderStore:
     def command(
         self, cmd: Command, session_status: Status, admission_status: Status,
     ) -> tuple[Notice, bytes]:
+        """Apply a local order command with the current admission and session policy."""
         order = self.view(cmd.slot)
         next_order = order
         status = session_status
@@ -345,18 +366,21 @@ class OrderStore:
         return reply, outbound
 
     def _live_index(self) -> dict[int, tuple[int, Order]]:
+        """Build the lookup from current venue references to order slots."""
         return {
             order.ref: (slot, order) for slot, order in self.orders.items()
             if order.live or order.pending == Pending.ENTER
         }
 
     def _replacement_index(self) -> dict[int, tuple[int, Order]]:
+        """Build the lookup from pending replacement references to slots."""
         return {
             order.next_ref: (slot, order) for slot, order in self.orders.items()
             if order.pending == Pending.REPLACE
         }
 
     def _ack(self, event: VenueEvent, order: Order) -> tuple[Status, Order]:
+        """Commit or reject a venue acknowledgment in the current order state."""
         pending = order.outstanding
         expected = Pending.ENTER if event.kind == "A" else Pending.REPLACE
         if order.pending != expected or pending is None or event.ref != pending.ref:
@@ -385,6 +409,7 @@ class OrderStore:
         )
 
     def _decrement(self, event: VenueEvent, order: Order) -> tuple[Status, Order]:
+        """Apply a venue-side quantity decrement without exceeding live shares."""
         if not order.live:
             return Status.LIFECYCLE, order
         if not 0 < event.quantity <= order.leaves:
@@ -406,6 +431,7 @@ class OrderStore:
 
     @staticmethod
     def _venue_reject(event: VenueEvent, order: Order) -> tuple[Status, Order]:
+        """Retire the matching in-flight order operation and preserve valid live state."""
         pending = order.outstanding
         if order.pending not in {Pending.ENTER, Pending.REPLACE} or pending is None:
             return Status.LIFECYCLE, order
@@ -417,11 +443,13 @@ class OrderStore:
 
     @staticmethod
     def _cancel_status(event: VenueEvent, order: Order) -> tuple[Status, Order]:
+        """Interpret whether a venue status terminates or leaves the order live."""
         if not order.live or order.pending != Pending.CANCEL:
             return Status.LIFECYCLE, order
         return Status.OK, order if event.kind == "P" else replace(order, outstanding=None)
 
     def event(self, event: VenueEvent, seq: int) -> Notice:
+        """Apply a sequenced venue event to the order with the referenced identity."""
         if event.kind == "U":
             hit = self._live_index().get(event.prev)
         elif event.kind == "J":
@@ -460,6 +488,7 @@ class OrderStore:
 
 
 def pack_login(login: Login) -> int:
+    """Pack a login request using the simulation interface's field widths."""
     return pack(astuple(login), LOGIN_WIDTHS)
 
 
@@ -467,6 +496,7 @@ class Session:
     """Retain acknowledged sequence, market state, and pending commands across sockets."""
 
     def __init__(self, slots: int = 8, tx_ticks: int = 4, rx_ticks: int = 7):
+        """Initialize the order ledger and independent link, timer and replay state."""
         if tx_ticks < 0 or rx_ticks < 0:
             raise ValueError("timer intervals must be nonnegative")
         self.capacity = slots
@@ -475,6 +505,7 @@ class Session:
         self.reset()
 
     def reset(self) -> None:
+        """Clear volatile state to the documented power-on defaults."""
         old_up = getattr(self, "up", False)
         self.store = OrderStore(self.capacity)
         self.metrics = Metrics()
@@ -494,19 +525,23 @@ class Session:
 
     @property
     def replaying(self) -> bool:
+        """Report whether the transport cursor still trails the committed session cursor."""
         return self.state == SessionState.ACTIVE and not self.logged_out and self.socket_cursor != self.checkpoint
 
     @property
     def close_socket(self) -> bool:
+        """Close the network-facing state and reset link-level timers and parsing."""
         return self.up and (self.state in (SessionState.ENDED, SessionState.FAULT) or self.logged_out)
 
     @property
     def admission(self) -> Status:
+        """Return the highest-priority reason an order is currently blocked."""
         if self.killed:
             return Status.KILLED
         return Status.OK if self.market else Status.MARKET_CLOSED
 
     def link(self, up: bool) -> None:
+        """Change connection state at an explicit transport boundary."""
         self.up = bool(up)
         if not self.up:
             if self.state != SessionState.ENDED:
@@ -517,9 +552,11 @@ class Session:
             self.rx_idle = 0
 
     def kill(self) -> None:
+        """Apply the session's one-shot kill behavior."""
         self.killed = True
 
     def request_login(self, request: Login) -> tuple[Notice | None, bytes]:
+        """Validate the login request and stage the corresponding wire frame."""
         if not self.up or self.state != SessionState.OFFLINE:
             raise RuntimeError("login transaction would be held: socket not ready")
         try:
@@ -537,6 +574,7 @@ class Session:
         return None, request.encode()
 
     def command(self, cmd: Command) -> tuple[Notice, bytes]:
+        """Apply a local order command with the current admission and session policy."""
         status = Status.OK
         if cmd.kind != CommandKind.QUERY:
             if not self.up or self.state != SessionState.ACTIVE or self.logged_out or self.replaying:
@@ -555,6 +593,7 @@ class Session:
         return notice, emitted
 
     def logout(self) -> bytes:
+        """Request orderly logout and record the expected control response."""
         if self.state != SessionState.ACTIVE or not self.up or self.logged_out:
             raise RuntimeError("logout has no active socket")
         self.logged_out = True
@@ -562,15 +601,18 @@ class Session:
         return control("O")
 
     def _fail(self, fault: Notice) -> Notice:
+        """Latch the session fault and drop the active logical connection."""
         self.state = SessionState.FAULT
         self.last_fault = Status(fault.status)
         self.metrics.add("fault_count")
         return fault
 
     def parser_fault(self, status: Status) -> Notice:
+        """Translate an RX framing error into the session's terminal fault handling."""
         return self._fail(Notice(NoticeKind.FAULT, status, seq=self.checkpoint))
 
     def _login_ack(self, payload: bytes) -> Notice:
+        """Validate login acknowledgment fields and select the replay starting point."""
         if self.request is None:
             raise RuntimeError("login ack without a pending request")
         session, sequence = payload[:10], payload[10:]
@@ -594,6 +636,7 @@ class Session:
         return Notice(NoticeKind.LOGIN, seq=start)
 
     def _ordered_event(self, event: VenueEvent) -> Notice:
+        """Suppress replayed events and require the next uncommitted sequence ID."""
         cursor = self.socket_cursor
         if cursor > self.checkpoint:
             return self._fail(Notice(NoticeKind.FAULT, Status.SEQUENCE_GAP, seq=cursor))
@@ -622,6 +665,7 @@ class Session:
         return notice
 
     def frame(self, envelope: Envelope) -> Notice | None:
+        """Apply a received SoupBinTCP envelope and return the resulting notice."""
         if not self.up or self.state not in (SessionState.ACTIVE, SessionState.LOGIN_WAIT) or self.logged_out:
             raise RuntimeError(f"frame is outside receive phase {self.state.name}")
         self.metrics.add("socket_frames")
@@ -656,6 +700,7 @@ class Session:
         return self._fail(Notice(NoticeKind.FAULT, Status.LOGIN_PHASE, seq=self.checkpoint))
 
     def tick(self) -> tuple[Notice | None, bytes]:
+        """Advance one timebase edge or the requested number of synthetic ticks."""
         if self.state != SessionState.ACTIVE or self.logged_out:
             return None, b""
         self.rx_idle += 1
@@ -669,6 +714,7 @@ class Session:
         return None, b""
 
     def snapshot(self, slot: int) -> int:
+        """Return visible session, sequence and slot fields for a checkpoint."""
         values = (
             self.state, self.last_fault, self.session, self.checkpoint, self.replaying,
             self.market, self.killed, self.close_socket, self.store.high_water,

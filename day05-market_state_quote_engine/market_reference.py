@@ -99,29 +99,36 @@ class Config:
 
     @staticmethod
     def mask(width: int) -> int:
+        """Compute the all-ones bound for an unsigned field of the selected width."""
         return (1 << width) - 1
 
     @property
     def quantity_max(self) -> int:
+        """Return the maximum representable per-order quantity."""
         return self.mask(self.quantity_width)
 
     @property
     def instrument_max(self) -> int:
+        """Return the largest value representable on the bank selector."""
         return self.mask(self.banks.bit_length())
 
     @property
     def sequence_max(self) -> int:
+        """Return the wrap mask for venue message sequence arithmetic."""
         return self.mask(self.sequence_width)
 
     @property
     def price_max(self) -> int:
+        """Return the highest configured price level accepted by the book."""
         return self.mask(self.levels.bit_length())
 
     @property
     def order_id_max(self) -> int:
+        """Return the highest identifier representable in the order slot field."""
         return self.mask(self.slots.bit_length())
 
     def rtl_parameters(self) -> Dict[str, int]:
+        """Map Python configuration fields to the hardware elaboration parameters."""
         return {
             "BANKS": self.banks,
             "LEVELS": self.levels,
@@ -175,12 +182,15 @@ class Command:
     tag: int = 0
 
     def values(self) -> Tuple[int, ...]:
+        """List the command's integer wire fields in stimulus order."""
         return tuple(int(getattr(self, field.name)) for field in fields(self))
 
     def is_query(self) -> bool:
+        """Identify a non-mutating diagnostic operation."""
         return self.op in QUERY_OPS
 
     def validate_width(self, config: Config) -> None:
+        """Check representable widths without requiring the operation to be semantically legal."""
         maximum = (
             config.instrument_max, 15, config.sequence_max, config.order_id_max,
             config.order_id_max, 1, config.price_max, config.quantity_max,
@@ -219,6 +229,7 @@ class Response:
 
     @classmethod
     def echo(cls, command: Command, **fields_) -> "Response":
+        """Verify that a response preserves the originating command's identity fields."""
         return cls(
             instrument=command.instrument,
             op=command.op,
@@ -255,6 +266,7 @@ class BBO:
     ask: Leg
 
     def diagnostic(self) -> Dict[str, int]:
+        """Project bid, ask, and depth information into response fields."""
         return {
             "bid_present": self.bid.present,
             "ask_present": self.ask.present,
@@ -269,13 +281,16 @@ class BBO:
 
 class MarketOrders:
     def __init__(self, config: Config):
+        """Create an empty order dictionary for one instrument geometry."""
         self.config = config
         self.orders: Dict[int, Order] = {}
 
     def side_orders(self, side: bool) -> Iterable[Order]:
+        """Select active orders on the requested side for grouped analysis."""
         return (order for order in self.orders.values() if order.side == side)
 
     def levels(self, side: bool) -> Dict[int, Depth]:
+        """Sum quantity and count across all occupied price levels on one side."""
         result: Dict[int, Depth] = {}
         for order in self.side_orders(side):
             prior = result.get(order.price, Depth())
@@ -283,9 +298,11 @@ class MarketOrders:
         return result
 
     def depth(self, side: bool, price: int) -> Depth:
+        """Read aggregate quantity and count for a single side and price."""
         return self.levels(side).get(price, Depth())
 
     def best(self, side: bool) -> Leg:
+        """Select the most competitive occupied price and its total visible quantity."""
         prices = self.levels(side)
         if not prices:
             return Leg()
@@ -293,9 +310,11 @@ class MarketOrders:
         return Leg(True, price, prices[price])
 
     def bbo(self) -> BBO:
+        """Combine the best bid and ask into the book view used by policy and diagnostics."""
         return BBO(self.best(False), self.best(True))
 
     def check(self, command: Command) -> Status:
+        """Validate the selected order action against the current book and its geometry."""
         cfg = self.config
         if command.order_id >= cfg.slots:
             return Status.ID
@@ -328,6 +347,7 @@ class MarketOrders:
         return Status.OK
 
     def mutate(self, command: Command) -> None:
+        """Apply a validated order event to the corresponding active order."""
         order_id = command.order_id
         if command.op in (Operation.ADD, Operation.SNAP_ADD):
             self.orders[order_id] = Order(command.side, command.price, command.quantity)
@@ -344,6 +364,7 @@ class MarketOrders:
                 self.orders[order_id] = replace(old, size=(old.size - command.quantity))
 
     def assert_invariants(self) -> None:
+        """Check ownership, quantities, and aggregate consistency after model updates."""
         cfg = self.config
         if len(self.orders) > cfg.slots:
             raise AssertionError("reference exceeded order slot capacity")
@@ -368,6 +389,7 @@ class Intent:
     pressure_ask: bool = False
 
     def key(self) -> Tuple[int, ...]:
+        """Extract the policy fields used to tell whether an intent has changed."""
         return (int(self.active), self.epoch, self.bid, self.ask, self.size)
 
 
@@ -383,10 +405,12 @@ class Quote:
     reason: int
 
     def key(self) -> Tuple[int, ...]:
+        """Extract the underlying intent fields without its publication revision."""
         return (int(self.active), self.epoch, self.bid, self.ask, self.size)
 
     @classmethod
     def from_intent(cls, instrument: int, revision: int, desired: Intent) -> "Quote":
+        """Wrap one desired intent with its instrument and assigned publication revision."""
         return cls(
             instrument=instrument, revision=revision, active=desired.active,
             epoch=desired.epoch, bid=desired.bid, ask=desired.ask,
@@ -395,6 +419,7 @@ class Quote:
 
 
 def quote_policy(cfg: Config, mode: MarketMode, epoch: int, bbo: BBO) -> Intent:
+    """Calculate a passive quote from current spread, grid, skew, and size constraints."""
     if mode != MarketMode.LIVE:
         return Intent(epoch=epoch, reason=Reason.INACTIVE)
     bid, ask = bbo.bid, bbo.ask
@@ -436,6 +461,7 @@ class BankOutcome:
 
 class Instrument:
     def __init__(self, cfg: Config):
+        """Initialize per-instrument sequence, mode, order state, and counters."""
         self.cfg = cfg
         self.book = MarketOrders(cfg)
         self.mode = MarketMode.COLD
@@ -445,10 +471,12 @@ class Instrument:
         self.statistics = [0] * 6
 
     def increment(self, stat: Statistic) -> None:
+        """Saturate the requested statistic when a diagnostic or update reaches the model."""
         wrapping = self.cfg.mask(self.cfg.stat_width)
         self.statistics[stat] = (self.statistics[stat] + 1) & wrapping
 
     def statistic(self, index: int) -> int:
+        """Look up a counter using the index passed by a diagnostic operation."""
         if index == Statistic.LIVE_ORDERS:
             return len(self.book.orders) & self.cfg.mask(self.cfg.stat_width)
         if index == Statistic.AGE:
@@ -456,11 +484,13 @@ class Instrument:
         return self.statistics[index]
 
     def response(self, command: Command, status: Status = Status.OK, **data) -> Response:
+        """Build the command echo and the resulting instrument state for the driver."""
         return Response.echo(
             command, status=status, mode=self.mode, expected=self.expected, epoch=self.epoch, **data,
         )
 
     def query(self, command: Command) -> Response:
+        """Answer a read-only request from current state before counting the query."""
         if command.op == Operation.ORDER:
             if command.order_id >= self.cfg.slots:
                 return self.response(command, Status.ID)
@@ -485,11 +515,13 @@ class Instrument:
         return self.response(command, statistic=self.statistic(command.stat_index))
 
     def fault(self, command: Command, reason: Status) -> BankOutcome:
+        """Fence output and record the reason when book or sequence integrity is lost."""
         self.mode = MarketMode.FENCED
         self.increment(Statistic.GAPS if reason == Status.GAP else Statistic.FAULTS)
         return BankOutcome(self.response(command, reason), faulted=True)
 
     def process(self, command: Command) -> BankOutcome:
+        """Handle a diagnostic, snapshot transition, or sequenced market update."""
         if command.is_query():
             outcome = BankOutcome(self.query(command))
         else:
@@ -499,6 +531,7 @@ class Instrument:
         return outcome
 
     def apply_sequenced(self, command: Command) -> BankOutcome:
+        """Apply one in-order market action and advance the expected sequence."""
         if command.op == Operation.SNAP_BEGIN:
             self.book = MarketOrders(self.cfg)
             self.mode = MarketMode.BOOT
@@ -529,6 +562,7 @@ class Instrument:
         return BankOutcome(self.response(command), refresh=True)
 
     def tick(self, pulse: bool, outcome: Optional[BankOutcome]) -> None:
+        """Advance the freshness lease unless a matching command refreshed it on this edge."""
         if outcome and outcome.refresh:
             self.age = 0
         elif outcome and outcome.faulted:
@@ -540,11 +574,13 @@ class Instrument:
                 self.increment(Statistic.TIMEOUTS)
 
     def desired(self) -> Intent:
+        """Calculate the current desired quote and its applicability to this book state."""
         return quote_policy(self.cfg, self.mode, self.epoch, self.book.bbo())
 
 
 class Publisher:
     def __init__(self, cfg: Config):
+        """Track the last published intent, revision, and current output slot for each lane."""
         self.cfg = cfg
         self.last = [Intent()] * cfg.banks
         self.revisions = [0] * cfg.banks
@@ -554,6 +590,7 @@ class Publisher:
         self.receipt: Optional[Quote] = None
 
     def dirty(self, bank: int, present: Intent) -> bool:
+        """Identify a desired intent that still needs a publication or refresh."""
         prior = self.last[bank]
         if (prior.active or present.active) and prior.key() != present.key():
             return True
@@ -565,6 +602,7 @@ class Publisher:
         return present.active and refresh and not has_offer
 
     def choose(self, desired: List[Intent]) -> Optional[int]:
+        """Choose the next eligible changed lane in rotating priority order."""
         bank_count = self.cfg.banks
         order = (*range(self.next_first, bank_count), *range(self.next_first))
         for bank in order:
@@ -573,6 +611,7 @@ class Publisher:
         return None
 
     def advance(self, desired: List[Intent], ready: bool) -> Optional[int]:
+        """Consume or retain the visible offer and stage the next changed lane."""
         offer = self.output
         stalled = offer is not None and not ready
         selected = None if stalled else self.choose(desired)
@@ -627,16 +666,19 @@ class CycleResult:
 
 class Engine:
     def __init__(self, cfg: Config):
+        """Construct the simulated top-level engine with its independent instruments and publisher."""
         self.cfg = cfg
         self.reset()
 
     def reset(self) -> None:
+        """Reset all instrument state and clear the visible diagnostics and quote pipelines."""
         self.instruments = [Instrument(self.cfg) for _ in range(self.cfg.banks)]
         self.publisher = Publisher(self.cfg)
         self.intent_stage = [Intent()] * self.cfg.banks
         self.response: Optional[Response] = None
 
     def compute(self, cycle: CycleInput, desired: List[Intent]) -> Combinational:
+        """Evaluate ready, valid, and output fields without advancing the model clock."""
         quote = self.publisher.output if not cycle.reset else None
         return Combinational(
             source_ready=not cycle.reset and (self.response is None or cycle.response_ready),
@@ -651,6 +693,7 @@ class Engine:
         )
 
     def cycle(self, cycle: CycleInput) -> CycleResult:
+        """Sample the current outputs, then commit the accepted work at the modeled edge."""
         desired = [bank.desired() for bank in self.instruments]
         observed = self.compute(cycle, desired)
         if cycle.reset:

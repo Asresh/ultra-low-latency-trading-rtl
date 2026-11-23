@@ -10,6 +10,7 @@ from latency_units import Q32, RateEpoch, RateError, RateMap, render
 
 class PiecewiseClock(unittest.TestCase):
     def test_three_rates_do_not_confuse_ns_with_raw_ticks(self):
+        """Cover the three rates do not confuse ns with raw ticks regression case."""
         c = RateMap(
             [RateEpoch(100, 5, Q32 // 2), RateEpoch(104, 9, 0), RateEpoch(106, 4, Q32 // 4)]
         )
@@ -25,6 +26,7 @@ class PiecewiseClock(unittest.TestCase):
         self.assertEqual(c.elapsed(104, 105), 9)
 
     def test_wrap_origin_ordering(self):
+        """Cover the wrap origin ordering regression case."""
         c = RateMap([RateEpoch(LIMIT64 - 4, 3, 0), RateEpoch(2, 10, 0)])
         self.assertEqual(c.elapsed(LIMIT64 - 2, 4), 35)
         self.assertEqual(c.elapsed(2, 2), 0)
@@ -34,6 +36,7 @@ class PiecewiseClock(unittest.TestCase):
             c.elapsed(4, 2)
 
     def test_invalid_epoch_shape_and_repeated_stamps(self):
+        """Cover the invalid epoch shape and repeated stamps regression case."""
         with self.assertRaisesRegex(RateError, "list"):
             RateMap.parse({})
         with self.assertRaisesRegex(RateError, "at least one"):
@@ -52,6 +55,7 @@ class PiecewiseClock(unittest.TestCase):
             RateMap.parse([{"tick": "0x10", "integer_ns": 3, "fraction_ns": -1}])
 
     def test_random_intervals_against_an_expanded_schedule(self):
+        """Cover the random intervals against an expanded schedule regression case."""
         rng = random.Random(323948)
         epochs = []
         expanded = []
@@ -68,6 +72,7 @@ class PiecewiseClock(unittest.TestCase):
             self.assertEqual(c.elapsed(start, end), sum(expanded[start:end], Fraction()))
 
     def test_no_delay_attached_to_nonmatch_status(self):
+        """Cover the no delay attached to nonmatch status regression case."""
         c = RateMap([RateEpoch(512, 8, 0)])
         e = Report.single(Status.DUPLICATE, Observation(100, 4, 0, 0, False), 300)
         self.assertIsNone(render(e, c)["duration_ns"])

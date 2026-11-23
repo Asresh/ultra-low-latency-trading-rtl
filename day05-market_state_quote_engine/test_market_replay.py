@@ -14,6 +14,7 @@ from verify_market import Trace
 
 
 def convert(rows, cfg=None):
+    """Round-trip fixture rows through the portable CSV decoder and encoder."""
     stream = StringIO()
     write_rows(stream, rows)
     stream.seek(0)
@@ -21,23 +22,27 @@ def convert(rows, cfg=None):
 
 
 def draw(raw, cfg=None):
+    """Create a test arrival record with selected bus ready controls."""
     stream = StringIO(",".join(CSV_FIELDS) + "\n" + raw + "\n")
     return list(read_rows(stream, cfg or Config()))
 
 
 def journal_source(cfg, results):
+    """Return a file-like journal stream suitable for independent checking."""
     header = {"schema": JOURNAL_SCHEMA, "profile": "fixture", "config": asdict(cfg)}
     rows = [json.dumps(header), *(json.dumps(row) for row in results)]
     return StringIO("\n".join(rows) + "\n")
 
 
 def rendered(cfg, feed):
+    """Capture the serialized representation used as a test journal input."""
     runner = ReplaySession(cfg)
     rows = [row.mapping() for row in runner.expand(feed)]
     return json.loads(json.dumps(rows))
 
 
 def seed_bank(cfg):
+    """Seed one instrument using the replay session's supported command interface."""
     return [
         FeedRow(0, reset=True),
         FeedRow(2, command=Command(op=Operation.SNAP_BEGIN, sequence=1, tag=1)),
@@ -50,36 +55,43 @@ def seed_bank(cfg):
 
 class CSVCase(unittest.TestCase):
     def test_fixture_round_trips_all_profiles(self):
+        """Check that fixture round trips all profiles."""
         for profile, cfg in PROFILES.items():
             with self.subTest(profile=profile):
                 original = list(fixture(cfg))
                 self.assertEqual(convert(original, cfg), original)
 
     def test_accepts_numeric_reserved_opcode(self):
+        """Check that accepts numeric reserved opcode."""
         row = FeedRow(1, command=Command(op=14, order_id=2, tag=3))
         self.assertEqual(convert([row]), [row])
 
     def test_rejects_duplicate_or_out_of_order_cycle(self):
+        """Check that rejects duplicate or out of order cycle."""
         for rows in ([FeedRow(4), FeedRow(4)], [FeedRow(7), FeedRow(6)]):
             with self.assertRaisesRegex(ValueError, "strictly increasing"):
                 convert(rows)
 
     def test_rejects_boolean_other_than_zero_or_one(self):
+        """Check that rejects boolean other than zero or one."""
         row = "0,0,2,1,1,,,,,,,,,,"
         with self.assertRaisesRegex(ValueError, "tick must be"):
             draw(row)
 
     def test_rejects_command_without_operation(self):
+        """Check that rejects command without operation."""
         row = "0,0,0,1,1,1,,4,,,,,,,"
         with self.assertRaisesRegex(ValueError, "fields require"):
             draw(row)
 
     def test_rejects_overflow_instead_of_silently_truncating(self):
+        """Check that rejects overflow instead of silently truncating."""
         row = FeedRow(2, command=Command(op=Operation.ADD, quantity=Config().quantity_max+1))
         with self.assertRaisesRegex(ValueError, "quantity.*outside"):
             convert([row])
 
     def test_rejects_arrival_on_reset(self):
+        """Check that rejects arrival on reset."""
         row = FeedRow(0, reset=True, command=Command())
         with self.assertRaisesRegex(ValueError, "combined with reset"):
             convert([row])
@@ -87,9 +99,11 @@ class CSVCase(unittest.TestCase):
 
 class HostReplayCase(unittest.TestCase):
     def setUp(self):
+        """Create an isolated replay fixture or journal checker for this test case."""
         self.cfg = PROFILES["edge"]
 
     def test_buffer_preserves_order_while_diagnostic_stalls(self):
+        """Check that buffer preserves order while diagnostic stalls."""
         arrival = [
             FeedRow(0, reset=True),
             FeedRow(1, command=Command(op=Operation.BBO, tag=1)),
@@ -108,6 +122,7 @@ class HostReplayCase(unittest.TestCase):
         self.assertEqual(session.counters["peak_backlog"], 2)
 
     def test_bounded_host_backlog_signals_overflow(self):
+        """Check that bounded host backlog signals overflow."""
         book = ReplaySession(self.cfg, capacity=1)
         book.step(FeedRow(0, command=Command(op=Operation.BBO)))
         book.step(FeedRow(1, command=Command(op=Operation.BBO, tag=1), response_ready=False))
@@ -115,6 +130,7 @@ class HostReplayCase(unittest.TestCase):
             book.step(FeedRow(2, command=Command(op=Operation.BBO, tag=2), response_ready=False))
 
     def test_reset_discards_stalled_ingress_not_future_inputs(self):
+        """Check that reset discards stalled ingress not future inputs."""
         tape = [
             FeedRow(0, reset=True),
             FeedRow(1, command=Command(op=Operation.BBO, tag=1)),
@@ -129,6 +145,7 @@ class HostReplayCase(unittest.TestCase):
         self.assertEqual(r.counters["accepts"], 2)
 
     def test_stale_quote_crosses_transport_but_consumer_drops_it(self):
+        """Check that stale quote crosses transport but consumer drops it."""
         commands = seed_bank(self.cfg)
         commands += [
             FeedRow(6, quote_ready=False),
@@ -147,6 +164,7 @@ class HostReplayCase(unittest.TestCase):
         self.assertEqual(ledger[11].quote_action, "withdraw_intent")
 
     def test_same_epoch_changed_size_drops_superseded_offer(self):
+        """Check that same epoch changed size drops superseded offer."""
         commands = seed_bank(self.cfg)
         commands += [
             FeedRow(6, quote_ready=False),
@@ -162,6 +180,7 @@ class HostReplayCase(unittest.TestCase):
         self.assertEqual(ledger[11].quote["size"], 1)
 
     def test_inventory_exposes_aggregates_and_counter_values(self):
+        """Check that inventory exposes aggregates and counter values."""
         session = ReplaySession(self.cfg)
         list(session.expand(seed_bank(self.cfg)))
         view, = session.inventory()
@@ -173,13 +192,16 @@ class HostReplayCase(unittest.TestCase):
 
 class AuditCase(unittest.TestCase):
     def setUp(self):
+        """Create an isolated replay fixture or journal checker for this test case."""
         self.cfg = Config()
         self.output = rendered(self.cfg, fixture(self.cfg))
 
     def audit(self, data=None):
+        """Run the offline checker on the supplied test journal."""
         return audit_stream(journal_source(self.cfg, data if data is not None else self.output))
 
     def test_journal_covers_gaps_and_watchdogs(self):
+        """Check that journal covers gaps and watchdogs."""
         result = self.audit()
         self.assertEqual(result["status_counts"], {"OK": 12, "GAP": 1})
         self.assertEqual(result["quote_actions"]["publish_intent"], 2)
@@ -188,11 +210,13 @@ class AuditCase(unittest.TestCase):
         self.assertEqual(result["installed_offline"], {})
 
     def test_audit_rejects_nonconsecutive_cycles(self):
+        """Check that audit rejects nonconsecutive cycles."""
         rows = self.output[:5] + self.output[6:]
         with self.assertRaisesRegex(JournalError, "nonconsecutive"):
             self.audit(rows)
 
     def test_audit_rejects_changed_response_echo(self):
+        """Check that audit rejects changed response echo."""
         rows = deepcopy(self.output)
         row = next(row for row in rows if row["response"] is not None)
         row["response"]["tag"] = 900
@@ -200,6 +224,7 @@ class AuditCase(unittest.TestCase):
             self.audit(rows)
 
     def test_audit_rejects_current_quote_with_an_old_epoch(self):
+        """Check that audit rejects current quote with an old epoch."""
         rows = deepcopy(self.output)
         row = next(row for row in rows if row["quote_current"])
         row["quote"]["epoch"] = 9
@@ -208,6 +233,7 @@ class AuditCase(unittest.TestCase):
             self.audit(rows)
 
     def test_audit_rejects_an_invented_simultaneous_pressure(self):
+        """Check that audit rejects an invented simultaneous pressure."""
         rows = deepcopy(self.output)
         row = next(row for row in rows if row["live"][0])
         row["pressure_bid"][0] = row["pressure_ask"][0] = True
@@ -215,6 +241,7 @@ class AuditCase(unittest.TestCase):
             self.audit(rows)
 
     def test_audit_rejects_quote_revision_discontinuity(self):
+        """Check that audit rejects quote revision discontinuity."""
         rows = deepcopy(self.output)
         row = next(row for row in rows if row["quote"] is not None)
         row["quote"]["revision"] = 2
@@ -229,6 +256,7 @@ class AuditCase(unittest.TestCase):
             self.audit(rows)
 
     def test_timeline_filters_interval_and_instrument(self):
+        """Check that timeline filters interval and instrument."""
         source = journal_source(self.cfg, self.output)
         cfg, _ = read_config(source)
         result = list(export_rows(read_entries(source, cfg), bank=1, first=0, last=18))
@@ -239,15 +267,18 @@ class AuditCase(unittest.TestCase):
 
 class ExactCosimCase(unittest.TestCase):
     def setUp(self):
+        """Create an isolated replay fixture or journal checker for this test case."""
         self.cfg = PROFILES["edge"]
         self.output = rendered(self.cfg, fixture(self.cfg))
 
     def entries(self):
+        """Return the validated journal entries used to build RTL replay vectors."""
         stream = journal_source(self.cfg, self.output)
         read_config(stream)
         return list(read_entries(stream, self.cfg))
 
     def test_vectors_match_input_lengths_and_reset_order(self):
+        """Check that vectors match input lengths and reset order."""
         out = StringIO()
         cfg, count, summary = audit_and_export(journal_source(self.cfg, self.output), out)
         vectors = out.getvalue().splitlines()
@@ -258,6 +289,7 @@ class ExactCosimCase(unittest.TestCase):
         self.assertTrue(all(len(vector.split()) == 16 for vector in vectors))
 
     def test_compare_finds_a_missing_trace_tail(self):
+        """Check that compare finds a missing trace tail."""
         entries = self.entries()
         trace = [
             Trace(entry.register.cycle, ReplayVector.from_entry(entry).stimulus, expected_pins(entry))
@@ -269,6 +301,7 @@ class ExactCosimCase(unittest.TestCase):
             compare(entries, trace[:-1])
 
     def test_compare_explains_signal_and_recent_context(self):
+        """Check that compare explains signal and recent context."""
         entries = self.entries()
         trace = [
             Trace(entry.register.cycle, ReplayVector.from_entry(entry).stimulus, expected_pins(entry))
@@ -282,11 +315,13 @@ class ExactCosimCase(unittest.TestCase):
             compare(entries, trace)
 
     def test_signal_vectors_require_initial_hardware_reset(self):
+        """Check that signal vectors require initial hardware reset."""
         rows = rendered(self.cfg, [FeedRow(1, command=Command(op=Operation.BBO))])
         with self.assertRaisesRegex(JournalError, "begin with an explicit"):
             audit_and_export(journal_source(self.cfg, rows), StringIO())
 
     def test_sim_config_rejects_unsafe_oversized_width(self):
+        """Check that sim config rejects unsafe oversized width."""
         with self.assertRaisesRegex(JournalError, "sequence_width"):
             validate_simulator_config(replace(self.cfg, sequence_width=32))
         with self.assertRaisesRegex(JournalError, "outside the legal"):

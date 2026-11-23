@@ -55,6 +55,7 @@ module tb_redundant_market_data;
     logic [31:0] ready_random = 32'h256b31b8;
     string location;
 
+    // Advance the deterministic testbench PRNG used for source and sink timing.
     function automatic logic [31:0] xorshift(input logic [31:0] previous);
         logic [31:0] part;
         begin
@@ -124,6 +125,7 @@ module tb_redundant_market_data;
         end
     end
 
+    // Send the requested number of stored beats on one lane while respecting its ready signal.
     task automatic drive_lane(input integer lane, input integer total, input integer profile);
         logic [31:0] random_bits;
         logic [63:0] data_value;
@@ -160,6 +162,7 @@ module tb_redundant_market_data;
         end
     endtask
 
+    // Install a session identifier and initial sequence, then wait for the control handshake.
     task automatic configure(input logic [79:0] session, input logic [63:0] next_seq);
         begin
             @(negedge clk);
@@ -172,6 +175,7 @@ module tb_redundant_market_data;
         end
     endtask
 
+    // Check a recovery request and deliberately stall it for hold_clocks if requested.
     task automatic compare_request(input logic [159:0] desired, input integer hold_clocks);
         integer before_count;
         begin
@@ -194,6 +198,7 @@ module tb_redundant_market_data;
         end
     endtask
 
+    // Read the selected statistics register and assert its expected counter value.
     task automatic compare_stat(input logic [3:0] index, input logic [31:0] desired);
         begin
             @(negedge clk);
@@ -207,6 +212,7 @@ module tb_redundant_market_data;
         end
     endtask
 
+    // Compare measured terminal edge timing and dual-lane overlap with the programmed bounds.
     task automatic compare_benchmark(input integer terminal_span, input integer event_latency,
                                      input integer ingress_span, input integer together);
         begin

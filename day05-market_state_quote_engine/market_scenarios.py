@@ -17,6 +17,7 @@ class Driver:
     quote_ready: bool = True
 
     def line(self) -> str:
+        """Format source control and command fields in one hardware driver row."""
         return " ".join(str(int(value)) for value in (
             self.reset, self.tick, self.response_ready, self.quote_ready,
         ))
@@ -28,6 +29,7 @@ class Beat:
     gap: int = 0
 
     def line(self) -> str:
+        """Format one bus command exactly as the scheduled SV bench consumes it."""
         return " ".join(str(value) for value in (*self.command.values(), self.gap))
 
 
@@ -41,11 +43,13 @@ class Scenario:
 
 class Tape:
     def __init__(self, config: Config, name: str):
+        """Initialize a deterministic stimulus stream and campaign metadata."""
         self.config = config
         self.scenario = Scenario(name, [], [Driver(reset=True)] * 2, set())
         self.instruments = [Instrument(config) for _ in range(config.banks)]
 
     def append(self, cmd: Command, gap: int = 0, expected: Optional[Status] = None) -> Status:
+        """Add a new scheduled drive cycle to the current scenario."""
         cfg = self.config
         cmd = replace(cmd, tag=(len(self.scenario.commands) & cfg.mask(cfg.tag_width)))
         cmd.validate_width(cfg)
@@ -65,6 +69,7 @@ class Tape:
         side: bool = False, price: int = 0, quantity: int = 0, stat_index: int = 0,
         sequence: Optional[int] = None, gap: int = 0, expected: Optional[Status] = None,
     ) -> Status:
+        """Issue a command with the requested sink behavior and optional idle gap."""
         if sequence is None:
             sequence = self.instruments[bank].expected if bank < self.config.banks else 0
         return self.append(
@@ -73,13 +78,16 @@ class Tape:
         )
 
     def level(self, bank: int, side: bool, price: int) -> None:
+        """Schedule a per-price query for checking aggregate depth."""
         self.send(bank, Operation.LEVEL, side=side, price=price, expected=Status.OK)
 
     def counters(self, bank: int) -> None:
+        """Schedule statistic reads on the chosen instrument."""
         for counter in Statistic:
             self.send(bank, Operation.STAT, stat_index=counter, expected=Status.OK)
 
     def inspect(self, bank: int) -> None:
+        """Add a read-only state probe to the current tape."""
         self.send(bank, Operation.BBO, expected=Status.OK)
         for order_id in range(self.config.slots):
             self.send(bank, Operation.ORDER, order_id=order_id, expected=Status.OK)
@@ -88,12 +96,14 @@ class Tape:
                 self.level(bank, side, price)
 
     def start(self, bank: int, sequence: int = 0, gap: int = 0) -> None:
+        """Begin a new cycle schedule from the prescribed reset condition."""
         self.send(bank, Operation.SNAP_BEGIN, sequence=sequence, gap=gap, expected=Status.OK)
 
     def seed_bank(
         self, bank: int, *, sequence: int = 0, gap: int = 0,
         bid_size: Optional[int] = None, ask_size: Optional[int] = None,
     ) -> None:
+        """Load a test book through the same snapshot command path exposed to the DUT."""
         cfg = self.config
         self.start(bank, sequence=sequence, gap=gap)
         self.send(
@@ -107,10 +117,12 @@ class Tape:
         self.send(bank, Operation.SNAP_END, expected=Status.OK)
 
     def complete(self) -> Scenario:
+        """Add enough idle cycles to let outstanding diagnostics and quotes drain."""
         return self.scenario
 
 
 def basic_changes(tape: Tape, bank: int) -> None:
+    """Exercise additions, replacements, cancels, and executions in a coherent book."""
     cfg = tape.config
     max_price = cfg.levels - 1
     tape.seed_bank(bank, sequence=cfg.sequence_max - 1)
@@ -153,6 +165,7 @@ def basic_changes(tape: Tape, bank: int) -> None:
 
 
 def fault_and_recover(tape: Tape, bank: int) -> None:
+    """Trigger a sequence fault and restore the instrument from a new snapshot."""
     cfg = tape.config
     tape.send(bank, Operation.HEARTBEAT, expected=Status.MODE)
     tape.start(bank, cfg.sequence_max)
@@ -190,6 +203,7 @@ def fault_and_recover(tape: Tape, bank: int) -> None:
 
 
 def semantic_faults(cfg: Config) -> Scenario:
+    """Send illegal order mutations that should fence the affected instrument."""
     tape = Tape(cfg, "faults")
     for bank in range(cfg.banks):
         fault_and_recover(tape, bank)
@@ -204,6 +218,7 @@ def semantic_faults(cfg: Config) -> Scenario:
 
 
 def remaining_legal_ops(tape: Tape, bank: int) -> Dict[str, List[int]]:
+    """Cover optional valid operations omitted by the basic scenario."""
     instrument = tape.instruments[bank]
     live = list(instrument.book.orders)
     available = [key for key in range(tape.config.slots) if key not in instrument.book.orders]
@@ -215,6 +230,7 @@ def remaining_legal_ops(tape: Tape, bank: int) -> Dict[str, List[int]]:
 
 
 def random_query(tape: Tape, rng: Random, bank: int) -> None:
+    """Pick a diagnostic command and index from the legal test geometry."""
     cfg = tape.config
     op = rng.choice((Operation.ORDER, Operation.LEVEL, Operation.BBO, Operation.STAT))
     tape.send(
@@ -225,6 +241,7 @@ def random_query(tape: Tape, rng: Random, bank: int) -> None:
 
 
 def random_boot(tape: Tape, rng: Random, bank: int) -> None:
+    """Build one reproducible initial snapshot for the selected bank."""
     cfg = tape.config
     tape.start(bank, rng.randint(0, cfg.sequence_max))
     chosen = rng.sample(range(cfg.slots), rng.randint(2, min(cfg.slots, 5)))
@@ -241,6 +258,7 @@ def random_boot(tape: Tape, rng: Random, bank: int) -> None:
 
 
 def random_update(tape: Tape, rng: Random, bank: int) -> None:
+    """Pick a mix of legal and deliberately faulting operations for a live book."""
     cfg = tape.config
     state = tape.instruments[bank]
     options = remaining_legal_ops(tape, bank)
@@ -281,6 +299,7 @@ def random_update(tape: Tape, rng: Random, bank: int) -> None:
 
 
 def randomized(cfg: Config, count: int, seed: int) -> Scenario:
+    """Interleave independent instrument traffic with pseudo-random backpressure."""
     tape = Tape(cfg, "stress")
     rng = Random(seed)
     for bank in range(cfg.banks):
@@ -325,6 +344,7 @@ def randomized(cfg: Config, count: int, seed: int) -> Scenario:
 
 
 def watchdog(cfg: Config) -> Scenario:
+    """Test that quote eligibility ends when the instrument receives no timely refresh."""
     tape = Tape(cfg, "watchdog")
     for bank in range(cfg.banks):
         tape.seed_bank(bank, sequence=cfg.sequence_max)
@@ -348,6 +368,7 @@ def watchdog(cfg: Config) -> Scenario:
 
 
 def same_edge_refresh(cfg: Config) -> Scenario:
+    """Test refresh and timeout competing at the same simulated edge."""
     tape = Tape(cfg, "same_edge_refresh")
     tape.seed_bank(0, sequence=1)
     tape.send(0, Operation.HEARTBEAT)
@@ -364,6 +385,7 @@ def same_edge_refresh(cfg: Config) -> Scenario:
 
 
 def global_reset(cfg: Config) -> Scenario:
+    """Clear in-flight activity and verify the next session begins with empty state."""
     tape = Tape(cfg, "reset")
     for bank in range(cfg.banks):
         tape.seed_bank(bank, sequence=bank)
@@ -382,6 +404,7 @@ def global_reset(cfg: Config) -> Scenario:
 
 
 def coalescing(cfg: Config) -> Scenario:
+    """Change desired quote fields while the previous output is stalled."""
     tape = Tape(cfg, "coalescing")
     for bank in range(cfg.banks):
         tape.seed_bank(bank, sequence=bank)
@@ -412,6 +435,7 @@ def coalescing(cfg: Config) -> Scenario:
 
 
 def line_rate(cfg: Config, count: int = 512) -> Scenario:
+    """Check diagnostic throughput under continuous ready and valid."""
     tape = Tape(cfg, "line_rate")
     for bank in range(cfg.banks):
         tape.seed_bank(bank, sequence=bank)
@@ -428,6 +452,7 @@ def line_rate(cfg: Config, count: int = 512) -> Scenario:
 
 
 def line_rate_updates(cfg: Config, groups: int = 96) -> Scenario:
+    """Exercise changing book state with one update issued on each available cycle."""
     tape = Tape(cfg, "line_rate_updates")
     tape.seed_bank(0, sequence=cfg.sequence_max)
     # Reuse the same three slots, including the source and destination of
@@ -455,6 +480,7 @@ def line_rate_updates(cfg: Config, groups: int = 96) -> Scenario:
 
 
 def all_scenarios(cfg: Config, count: int, seed: int) -> Iterable[Scenario]:
+    """Build and name every directed and seeded campaign for this profile."""
     yield semantic_faults(cfg)
     yield watchdog(cfg)
     yield same_edge_refresh(cfg)

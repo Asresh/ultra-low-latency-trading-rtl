@@ -13,11 +13,13 @@ from net_wire import MacBeat, Result, Rule
 
 
 def read_text(path):
+    """Read generated fixture text using its documented character encoding."""
     return [line.split() for line in path.read_text().splitlines()]
 
 
 class ReplayBundleTests(unittest.TestCase):
     def test_synthetic_fixture_reproducible_and_exercises_dispositions(self):
+        """Check that synthetic fixture reproducible and exercises dispositions."""
         encoded = synthetic_input(4704)
         self.assertEqual(encoded,synthetic_input(4704))
         self.assertNotEqual(encoded,synthetic_input(4705))
@@ -33,6 +35,7 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertGreater(report["capture_timestamp_reorders"],0)
 
     def test_file_serials_and_pkt_body_agree(self):
+        """Check that file serials and pkt body agree."""
         pkt1 = standard(b"approved")
         pkt2 = standard(b"denied",dst_port=1000)
         fixture = section()+interface(scale=9)
@@ -57,6 +60,7 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertEqual(read_text(root/"rt_counts.txt"),[["16","2","1"]])
 
     def test_capture_record_filter_keeps_original_serial_number(self):
+        """Check that capture record filter keeps original serial number."""
         first = standard(b"drop from capture").serialize()
         second = standard(b"keep unicast").serialize()
         blob = section()+interface()+interface()+enhanced("<",first)+enhanced("<",second,iface=1)
@@ -68,6 +72,7 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertEqual(info[0],"1")
 
     def test_rules_machine_prefix_padding_and_limit(self):
+        """Check that rules machine prefix padding and limit."""
         with tempfile.TemporaryDirectory() as directory:
             p = Path(directory)
             cfg = stable_rules()
@@ -78,6 +83,7 @@ class ReplayBundleTests(unittest.TestCase):
                 bundle((),p,[Rule()]*9)
 
     def test_zero_checksum_strict_model_matches_opcode_contract(self):
+        """Check that zero checksum strict model matches opcode contract."""
         raw = standard(b"disabled",udp_zero=True).serialize()
         data = section()+interface()+enhanced("<",raw)
         with tempfile.TemporaryDirectory() as output:
@@ -89,6 +95,7 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertEqual(int(result[1],16)>>376,Result.UDP_ZERO)
 
     def test_bundle_cli_does_not_overwrite_capture_or_policy(self):
+        """Check that bundle CLI does not overwrite capture or policy."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             capture = root / "rt_rules.txt"

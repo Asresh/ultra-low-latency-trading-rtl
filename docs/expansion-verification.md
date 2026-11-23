@@ -19,7 +19,7 @@ All five projects pass Verilator lint and Yosys structural synthesis. The [conti
 | 04 | 26 simulated cycles from first accepted MAC RX beat to metadata. Empty-body TX starts two cycles after its descriptor. | MAC/PHY adapter, FPGA timing and sustained wire throughput require a target platform. |
 | 05 | One cycle to an unloaded ACK and three cycles to an unloaded quote. Default out-of-context ECP5 route reached **43.84 MHz**. | The route missed its 100 MHz constraint. Its critical path includes the level read and policy datapath. |
 | 06 | 4,096 observations over 4,681 offered capacity cycles. The unstalled correlator returns a result after one cycle. | Digital tests cover clock crossing order and skew in simulation. Board calibration, physical CDC analysis and routed timing are platform-specific. |
-| 07 | The pre-audit out-of-context ECP5 route reached **25.99 MHz**. The audited RTL passed generic synthesis. | The previous route missed its 100 MHz constraint. TCP and exchange connectivity belong to the adapter. |
+| 07 | The audited out-of-context ECP5 route reached **27.49 MHz**. | The route missed its 100 MHz constraint. Its critical path runs from RX assembly through decode and lifecycle update to the order table. TCP and exchange connectivity belong to the adapter. |
 | 08 | Three-queue simulation saw at most two eligible grants bypassed and verified no retirement across 521 held-B cycles. | The design exposes an AXI memory interface. PCIe, cache coherency, driver integration and routed timing require a platform. |
 
 The ECP5 results report throughput constraints for isolated default cores. The cycle metrics apply to the stated test profiles.

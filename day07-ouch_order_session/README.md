@@ -143,7 +143,7 @@ python3 ouch_audit.py audit fixtures/audit_example.jsonl --details --fail-on-fau
 
 ## Integration and performance boundaries
 
-The pre-audit ECP5 build routed at **25.99 MHz**, below the 100 MHz constraint, with 39,075 combinational cells and 10,378 flip-flops. Its critical path ran from assembled RX bytes through decode and order-state update into the order table. The audited RTL passed generic synthesis with 61,527 cells and zero structural findings. Use `make timing` to generate a fresh ECP5 timing report in `build/session-route.json`.
+The audited ECP5 build routed at **27.49 MHz**, below the 100 MHz constraint, with 38,178 combinational cells and 10,391 flip-flops. Its 36.374 ns critical path runs from assembled RX bytes through decode and order-state update into the order table. Generic synthesis reported 61,527 cells and zero structural findings. Run `make timing` to reproduce the ECP5 timing report in `build/session-route.json`.
 
 The 64-bit ready/valid ports accept eight selected bytes in a handshake. Header and frame retirement consume additional clocks. Worst-case packet rate depends on message size, fragmentation, notice backpressure, and the CAM and barrel-shift paths. The raw port width is therefore separate from an achieved payload throughput number. The order table scans for peer refs and should use a banked or indexed lookup when scaled. The timing target excludes TCP, packet I/O, and board routes.
 

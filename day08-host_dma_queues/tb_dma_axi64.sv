@@ -72,6 +72,15 @@ module tb_dma_axi64 #(
         end
     endfunction
 
+    function automatic bit invalid_transfer(input logic [63:0] address, input integer bytes);
+        logic [64:0] end_exclusive;
+        begin
+            end_exclusive = {1'b0,address} + (65'((bytes + 7) / 8) * 8);
+            invalid_transfer = bytes == 0 || address[2:0] != 0 ||
+                               end_exclusive > {1'b1,64'd0};
+        end
+    endfunction
+
     integer cases_checked = 0, ar_count = 0, aw_count = 0, r_count = 0, w_count = 0;
     integer page_splits = 0, cap_splits = 0, partial_masks = 0;
     integer blocked_read = 0, blocked_write = 0, blocked_ar = 0, blocked_aw = 0;
@@ -219,13 +228,13 @@ module tb_dma_axi64 #(
                 prior_b = bvalid && !bready;
                 if (rd_cmd_valid && rd_cmd_ready) begin
                     read_issued = 1;
-                    expected_r_fault = bytes_r == 0 || start_r[2:0] != 0;
+                    expected_r_fault = invalid_transfer(start_r, bytes_r);
                     expected_protocol = 0;
                     expected_r_done = expected_r_fault;
                 end
                 if (wr_cmd_valid && wr_cmd_ready) begin
                     write_issued = 1;
-                    expected_w_fault = bytes_w == 0 || start_w[2:0] != 0;
+                    expected_w_fault = invalid_transfer(start_w, bytes_w);
                     expected_w_done = expected_w_fault;
                 end
                 if (arvalid && arready) begin
@@ -335,6 +344,8 @@ module tb_dma_axi64 #(
         repeat (3) @(negedge clk);
         reset = 0;
         run_case(64'h1ff8, 64'hbfe8, 347, 198, OKAY, OKAY);
+        run_case(64'hffff_ffff_ffff_fff8, 64'hffff_ffff_ffff_fff0, 1, 16, OKAY, OKAY);
+        run_case(64'hffff_ffff_ffff_fff8, 64'hffff_ffff_ffff_fff0, 9, 17, OKAY, OKAY);
         run_case(64'h0, 64'h20, 0, 0, OKAY, OKAY);
         run_case(64'h127, 64'h22a, 9, 18, OKAY, OKAY);
         run_case(64'h1234_5678_9abc_d000, 64'h8210_0000_fedc_1000, 79, 112, FAULT_R, FAULT_B);

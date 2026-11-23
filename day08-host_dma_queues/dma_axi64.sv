@@ -81,6 +81,16 @@ module dma_axi64 #(
         byte_enable = bytes >= 8 ? 8'hff : (8'd1 << bytes[2:0]) - 1'b1;
     endfunction
 
+    function automatic logic valid_command(input logic [63:0] address, input logic [31:0] bytes);
+        logic [31:0] last_bus_offset;
+        begin
+            last_bus_offset = (bytes - 32'd1) | 32'd7;
+            // A 32-bit offset can wrap the full address only in the top 4 GiB.
+            valid_command = bytes != 0 && address[2:0] == 0 &&
+                            (!(&address[63:32]) || last_bus_offset <= ~address[31:0]);
+        end
+    endfunction
+
     wire [BURST_W-1:0] planned_read = burst_beats(read_address[11:0], read_left);
     wire [BURST_W-1:0] planned_write = burst_beats(write_address[11:0], write_left);
     wire read_beat = rvalid && rready;
@@ -129,7 +139,7 @@ module dma_axi64 #(
                     read_left <= rd_cmd_bytes;
                     rd_fault <= 1'b0;
                     rd_protocol <= 1'b0;
-                    if (rd_cmd_bytes == 0 || rd_cmd_addr[2:0] != 0) begin
+                    if (!valid_command(rd_cmd_addr, rd_cmd_bytes)) begin
                         rd_fault <= 1'b1;
                         rd_done <= 1'b1;
                     end else begin
@@ -179,7 +189,7 @@ module dma_axi64 #(
                     write_address <= wr_cmd_addr;
                     write_left <= wr_cmd_bytes;
                     wr_fault <= 1'b0;
-                    if (wr_cmd_bytes == 0 || wr_cmd_addr[2:0] != 0) begin
+                    if (!valid_command(wr_cmd_addr, wr_cmd_bytes)) begin
                         wr_fault <= 1'b1;
                         wr_done <= 1'b1;
                     end else begin

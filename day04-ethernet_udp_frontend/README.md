@@ -115,7 +115,7 @@ All interfaces share `clk` and synchronous active-high `rst`. Every ready/valid 
 | 239:192 | Source MAC | 191:160 | Source IPv4 |
 | 159:128 | Destination IPv4 | 127:112 | Source UDP port |
 | 111:96 | Destination UDP port | 95:80 | Payload bytes |
-| 79:64 | Captured frame bytes | 63:48 | Outer TCI |
+| 79:64 | Frame bytes bounded by the RX capture limit | 63:48 | Outer TCI |
 | 47:32 | Inner TCI | 31:16 | IPv4 ID |
 | 15:8 | TTL | 7:6 | VLAN depth |
 | 5 | UDP omitted | 4 | DF |
@@ -154,13 +154,13 @@ Counter indexes 0–5 measure MAC RX frames, kept bytes, passed results, rejects
 
 | Run | Evidence |
 | --- | --- |
-| End to end, seed 4101 | 322 RX results, 2,374 validated body beats, 4,689 TX wire beats, 303 completions |
-| End to end, seed 9717 | 412 RX results including 90 directed cross-layer faults, 2,477 body beats, 4,697 TX wire beats, 303 completions |
-| Strict receive checksum | 194 RX results and 175 completions, including rejected zero UDP checksums |
-| Default geometry | 220 RX results and 199 completions, exact 1,536-byte capture and 1,472-byte TX body ceilings, all final keep widths |
-| PCAPng into RTL | 144 packet replays across three interfaces and two byte orders, 64 rejects, 4,341 successfully delivered payload bytes |
+| End to end, seed 4101 | 323 RX results, 2,384 validated body beats, 4,647 TX wire beats, 303 completions |
+| End to end, seed 9717 | 413 RX results including 90 directed cross-layer faults, 2,369 body beats, 4,775 TX wire beats, 303 completions |
+| Strict receive checksum | 195 RX results and 175 completions, including rejected zero UDP checksums |
+| Default geometry | 221 RX results and 199 completions, exact 1,536-byte capture and 1,472-byte TX body ceilings, all final keep widths |
+| PCAPng into RTL | 144 packet replays across three interfaces and two byte orders in both checksum modes, with 64 rejects and 4,341 delivered bytes in permissive mode and 68 rejects and 4,100 delivered bytes in strict mode |
 | Focused checks | 362 arbiter packets, 2,720 paired RAM reads, counter saturation, CSR readback/commit/strobes and reset with partially captured or stalled frames |
-| Software tests | 62 Python tests covering capture readers, rule and CSR tools, transport wire model, replay bundles and fault matrix |
+| Software tests | 64 Python tests covering capture readers, rule and CSR tools, transport wire model, replay bundles, input/output path collisions, and the fault matrix |
 
 In the directed simulation, an untagged minimum frame took **26 cycles** from first accepted RX beat to metadata transfer, or **19 cycles** after the final MAC beat. An empty-body TX descriptor began transmitting after **2 cycles**. Its frames transferred one beat per cycle with six simultaneous RX and TX beats in that scenario. Full bank occupancy, packet validation and sink backpressure affect sustained throughput. These cycle measurements apply to RTL simulation. Generic synthesis does not establish a device clock or sustained Ethernet line rate.
 

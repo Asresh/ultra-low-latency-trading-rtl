@@ -1,12 +1,17 @@
 """Construct byte-exact Ethernet/UDP captures for the offline replay tool."""
 
+from contextlib import redirect_stderr
 import io
+import os
+from pathlib import Path
 import struct
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from pcap_replay import (
     Endpoint, MAGICS, PacketDrop, PcapError, header_checksum_valid,
-    pack_beats, read_capture, schedule, udp_datagram,
+    main, pack_beats, read_capture, schedule, udp_datagram,
 )
 
 
@@ -68,6 +73,23 @@ class PcapInputTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(PcapError, message):
                     list(read_capture(io.BytesIO(stream)))
+
+    def test_cli_rejects_hardlinked_output_without_touching_capture(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "capture.pcap"
+            output = Path(temp) / "vectors.txt"
+            expected = pcap([(0, 0, packet(A))])
+            source.write_bytes(expected)
+            os.link(source, output)
+            argv = [
+                "pcap_replay", str(source), "--lane-a", "239.1.2.3:12000",
+                "--lane-b", "239.1.2.4:12001", "--output", str(output),
+            ]
+            stderr = io.StringIO()
+            with patch("sys.argv", argv), redirect_stderr(stderr), self.assertRaises(SystemExit):
+                main()
+            self.assertIn("capture and output must be different files", stderr.getvalue())
+            self.assertEqual(source.read_bytes(), expected)
 
 
 class UdpExtractionTests(unittest.TestCase):
@@ -140,8 +162,10 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(output.getvalue().splitlines()[-1].startswith("1 1 "))
 
     def test_bad_scheduler_controls(self):
-        with self.assertRaisesRegex(ValueError, "distinct"):
-            schedule([], io.StringIO(), (A, A), 250_000_000)
+        for endpoints in ((A, A), (A, B, A), (A,)):
+            with self.subTest(endpoints=endpoints):
+                with self.assertRaisesRegex(ValueError, "distinct"):
+                    schedule([], io.StringIO(), endpoints, 250_000_000)
         with self.assertRaisesRegex(ValueError, "clock"):
             schedule([], io.StringIO(), (A, B), 0)
         with self.assertRaisesRegex(ValueError, "gap"):

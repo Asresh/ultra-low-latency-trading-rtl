@@ -31,6 +31,7 @@ module formal_publication(input wire clk);
     reg [RVW-1:0] next_revision [0:BANKS-1];
     reg [KW-1:0] prior_sent [0:BANKS-1];
     reg [BANKS-1:0] seen;
+    reg [BANKS-1:0] invalidated;
 
     always @(posedge clk) begin
         sampled <= 1'b1;
@@ -44,12 +45,18 @@ module formal_publication(input wire clk);
 
         if (rst) begin
             seen <= '0;
+            invalidated <= '0;
             for (integer bank = 0; bank < BANKS; bank++) begin
                 next_revision[bank] <= '0;
                 prior_sent[bank] <= '0;
             end
             assert(!q_valid && !q_current);
         end else begin
+            for (integer bank = 0; bank < BANKS; bank++) begin
+                if (seen[bank] && prior_sent[bank][KW-1] &&
+                    desired_now[(bank+1)*KW-1-:EW+1] != prior_sent[bank][KW-1-:EW+1])
+                    invalidated[bank] <= 1'b1;
+            end
             if (sampled && !$past(rst) && $past(q_valid && !q_ready)) begin
                 assert(q_valid);
                 assert(publication == $past(publication));
@@ -69,13 +76,15 @@ module formal_publication(input wire clk);
                         if (q_ready) begin
                             assert(q_revision == next_revision[bank]);
                             if (seen[bank]) begin
-                                assert(output_key != prior_sent[bank]);
                                 assert(q_active || prior_sent[bank][KW-1]);
+                                if (output_key == prior_sent[bank])
+                                    assert(q_active && invalidated[bank]);
                             end else begin
                                 assert(q_active);
                             end
                             seen[bank] <= 1'b1;
                             prior_sent[bank] <= output_key;
+                            invalidated[bank] <= q_active && !q_current;
                             next_revision[bank] <= next_revision[bank]+RVW'(1);
                         end
                     end

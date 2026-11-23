@@ -353,14 +353,18 @@ module ouch_order_session #(
                         tx_submit = 1'b1;
                     end
                 end
-            end else if (transport_up && heartbeat_due && tx_ready) begin
-                tx_submit = 1'b1;
-                tx_packet = control_packet("R");
-                send_heartbeat = 1'b1;
             end else if (transport_up && login_port_idle) begin
                 s_login_ready = space && decimal_accept_ready;
             end
 
+            // A local notice or stalled RX notice does not transmit any bytes.
+            // Reuse the idle serializer unless another frame was selected.
+            if (transport_up && heartbeat_due && tx_ready && !tx_submit &&
+                urgent_fault == ST_OK && !this_fault && state_d == S_ACTIVE) begin
+                tx_submit = 1'b1;
+                tx_packet = control_packet("R");
+                send_heartbeat = 1'b1;
+            end
             if (transport_up && state_q == S_LOGIN_SEND && tx_fire && m_tx_last)
                 state_d = S_LOGIN_WAIT;
             if (this_fault)

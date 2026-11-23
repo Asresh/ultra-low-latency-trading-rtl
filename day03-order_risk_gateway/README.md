@@ -100,7 +100,7 @@ All interfaces share `clk`. The rising edge transfers a channel when its valid a
 
 A policy is active when enabled, the minimum price is positive and at most the maximum, quantity and notional caps are nonzero, and the open-order cap is in `1..ORDER_SLOTS`. Policy writes keep existing reservations. Lowering caps affects later admissions. Reconciliation continues when policy is disabled or the halt is latched.
 
-The first applicable rejection wins. Invalid operation, address, and payload fields are checked before slot state. Admission then checks halt, policy, quantity, price, open notional, and open count. A fault on a reconciliation request returns a diagnostic and latches the admission halt.
+The first applicable rejection wins. Invalid operation, address, and payload fields are checked before slot state. Admission then checks halt, policy, quantity, price, open notional, and open count. A partial fill on the final event sequence is rejected before checking its proposed executed notional. A fault on a reconciliation request returns a diagnostic and latches the admission halt.
 
 | Code | Status | Meaning |
 | ---: | --- | --- |
@@ -133,7 +133,7 @@ Configure buy key `(account=0, instrument=0, side=0)` with a collar of 10–50, 
 
 ## Audit adapter
 
-`risk_audit_tap` copies primary **transfers** to a bounded observation queue. Its lossless default can pause the primary stream when the audit queue is full. Its best-effort mode leaves primary ready independent of the audit sink. A full best-effort queue counts discarded copies with a saturating counter and a sticky overflow indicator. Simultaneous dequeue and enqueue can use the freed entry. The primary record is unchanged in both modes.
+`risk_audit_tap` copies primary **transfers** to a bounded observation queue. The default lossless mode pauses the primary stream while the audit queue is full, even on the cycle the sink frees an entry. Best-effort mode leaves primary ready independent of the audit sink and can copy a record into an entry freed on that same cycle. A full best-effort queue counts discarded copies with a saturating counter and a sticky overflow indicator. Host readers can use that counter to detect drops even when the serializer's frame IDs are contiguous.
 
 `risk_audit_serializer` emits one 32-bit word per handshake. The frame begins with `32'h314b5352` (ASCII `RSK1` in little-endian byte lanes), then an 8-bit version and 24-bit payload bit count, a 32-bit wrapping frame ID, and the payload in least-significant-word-first order, padded with zero high bits. The final word is IEEE CRC-32 over the preceding little-endian bytes. A stalled word holds data and both boundary flags. Serializer reset drops a partial frame and starts the next ID at zero.
 
@@ -150,7 +150,7 @@ make test-gate
 python3 audit_trace.py check --profile narrow --capture build/narrow/audit.hex --expected build/narrow/expected.txt
 ```
 
-- The default differential test runs 3,705 checked transactions in each of the 8×8 and 24×16 price-by-quantity profiles. The Python oracle recomputes open exposure by scanning its live orders. RTL maintains its counters incrementally. The test checks deterministic internal commit deadlines and captures every response through the lossless tap and serializer under stalls.
+- The default differential test runs 3,720 checked transactions in each of the 8×8 and 24×16 price-by-quantity profiles. The Python oracle recomputes open exposure by scanning its live orders. RTL maintains its counters incrementally. The test checks deterministic internal commit deadlines and captures every response through the lossless tap and serializer under stalls. It also covers the saturated-ledger case where a partial fill at the terminal sequence is rejected without latching halt or consuming that sequence.
 - The protocol bench verifies full-FIFO behavior, configuration priority, a halt on the commit edge, reset during in-flight work, and an injected accounting error. The separate audit tap bench exercises drop saturation, depth-one queue reuse, and simultaneous refill while full.
 - The [formal harness](formal/formal_gateway.sv) checks ordered responses, stalled payload stability, reservation consistency, configuration exclusion, and sticky halt for a one-account, one-instrument, one-slot instance with 3-bit prices and quantities. The repository's `make formal` runs the [18-step bounded check and 26-step cover](formal/gateway.sby). The cover goals include a terminal fill after admission, a stale generation reject, a held reply that transfers, and a cancel after halt.
 - The netlist regression synthesizes the narrow gateway and feeds it the directed orders plus 100 randomized transactions. The checking path uses the synthesized transaction engine and RTL audit adapters. `make synth` also checks the three independent module tops and saves the generic gate report and gateway JSON in `build/`.

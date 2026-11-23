@@ -54,6 +54,7 @@ module tb_multiclock_latency_telemetry;
     logic [321:0] trace_held;
     logic [129:0] hist_held;
     integer hist_words = 0, trace_words = 0;
+    logic trace_in_frame = 0;
     integer probe_count [0:2];
     integer axi_reads = 0, axi_writes = 0;
 
@@ -62,6 +63,7 @@ module tb_multiclock_latency_telemetry;
             event_hold = 0;
             hist_hold = 0;
             trace_hold = 0;
+            trace_in_frame = 0;
         end else begin
             if (event_hold && !dut.flush && (!event_valid || event_data !== event_held))
                 $fatal(1, "A report changed under stall before the control fence");
@@ -92,10 +94,11 @@ module tb_multiclock_latency_telemetry;
                 if (hist_last) hist_frames++;
             end
             if (trace_valid && trace_ready) begin
-                if (trace_first !== (trace_words == 0))
+                if (trace_first !== !trace_in_frame)
                     $fatal(1, "Trace framing error");
                 $fwrite(trace_file, "%080h\n", trace_word);
                 trace_words++;
+                trace_in_frame = !trace_last;
                 if (trace_last) trace_frames++;
             end
         end
@@ -341,6 +344,39 @@ module tb_multiclock_latency_telemetry;
             $fatal(1, "Latched clock register is not a past snapshot");
         read_register('h084, 2'b00, value);
         if (value != 0) $fatal(1, "Clear status counters did not take effect");
+
+        // Transfer a trigger on the exact edge the register bank accepts rearm.
+        // An acknowledged rearm wins that edge and discards old capture state.
+        write_register('h028, 32'h00010001, 4'hf, 2'b00, 0);
+        write_register('h008, 'h41, 4'hf, 2'b00, 0);
+        event_ready = 0;
+        observe(2, 181, 3, 0);
+        wait (event_valid);
+        fork
+            write_register('h008, 'h41, 4'hf, 2'b00, 0);
+            begin
+                do @(negedge ref_clk);
+                while (!(dut.req_valid && dut.req_ready && dut.req_write && dut.req_addr == 'h008));
+                event_ready = 1;
+            end
+        join
+        if (trace_valid) $fatal(1, "Trace froze instead of honoring successful same-edge rearm");
+        read_register('h00c, 2'b00, value);
+        if (value[5:4] != 2'b01) $fatal(1, "Trace is not armed after a successful rearm");
+        start_index = report_count;
+        observe(1, 182, 3, 0);
+        expect_report(start_index, 0, 182, 3);
+        wait (trace_valid);
+        write_register('h008, 'h41, 4'hf, 2'b10, 0);
+        if (trace_word[31:13] !== {8'd1,8'd0,3'd0})
+            $fatal(1, "New trace did not start with the first report after rearm");
+        @(negedge ref_clk);
+        trace_ready = 1;
+        wait (trace_frames == 2);
+        @(negedge ref_clk);
+        trace_ready = 0;
+        if (trace_words != 7) $fatal(1, "Unexpected report count after same-edge rearm");
+
         if (event_stalls == 0 || trace_stalls == 0 || hist_stalls == 0)
             $fatal(1, "Expected stall coverage on every egress");
 

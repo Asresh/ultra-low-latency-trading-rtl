@@ -44,7 +44,7 @@ module latency_registers #(
     output logic [63:0]              timeout_ticks,
     output logic                     hist_snapshot,
     input  wire                      hist_snapshot_ready,
-    output logic                     trace_arm,
+    output wire                      trace_arm,
     output logic                     trace_enable,
     output logic [7:0]               trace_mask,
     output logic [63:0]              trace_threshold,
@@ -85,6 +85,10 @@ module latency_registers #(
     logic [1:0] read_result, write_result;
 
     assign req_ready = !reset && (!rsp_valid || rsp_ready);
+    // Arm on the accepted register edge so a concurrent trigger cannot freeze
+    // the trace between the readiness check and delivery of the command.
+    assign trace_arm = req_valid && req_ready && req_write && req_addr == 'h008 &&
+                       write_result == OKAY && command[6];
 
     always @* begin
         read_data = '0;
@@ -150,7 +154,6 @@ module latency_registers #(
             trace_enable <= 1'b0;
             trace_post <= '0;
             trace_mask <= 8'hf8;
-            trace_arm <= 1'b0;
             hist_snapshot <= 1'b0;
             rate_valid <= 1'b0;
             rate_ns <= '0;
@@ -159,7 +162,6 @@ module latency_registers #(
             latched_ns <= '0;
             latched_fraction <= '0;
         end else begin
-            trace_arm <= 1'b0;
             clear_counters <= 1'b0;
             flush <= 1'b0;
             if (rate_valid && rate_ready)
@@ -194,8 +196,6 @@ module latency_registers #(
                             end
                             if (command[5])
                                 timeout_ticks <= shadow_timeout;
-                            if (command[6])
-                                trace_arm <= 1'b1;
                             if (command[7]) begin
                                 latched_tick <= now_tick;
                                 latched_ns <= now_ns;

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import zlib
 
-from capture_io import CaptureError, DLT_ETHERNET, packets, tick_period_ns
+from capture_io import CaptureError, DLT_ETHERNET, check_output_paths, packets, tick_period_ns
 from net_wire import Decoded, Result, Rule, classify, parse_frame, to_beats
 from rule_control import load_policy
 
@@ -152,10 +152,13 @@ class Study:
                 entry.disposition[status] += 1
             return ()
 
-        result = Decoded(Result.MAC_BAD,len(frame),epoch=self.epoch) if mac_error else classify(
-            parse_frame(frame,max_frame=self.max_frame,allow_zero=self.allow_zero),
-            self.rules,self.epoch,
-        )
+        if mac_error:
+            result = Decoded(Result.MAC_BAD, min(len(frame), self.max_frame), epoch=self.epoch)
+        else:
+            result = classify(
+                parse_frame(frame,max_frame=self.max_frame,allow_zero=self.allow_zero),
+                self.rules,self.epoch,
+            )
         beats = to_beats(frame,bad=mac_error)
         start = self.scheduler.start(record.capture_time_ns,len(beats))
         for entry in targets:
@@ -214,6 +217,7 @@ def main():
     args = ap.parse_args()
 
     try:
+        check_output_paths((args.capture, args.policy), (args.output, args.expected))
         rules = load_policy(args.policy) if args.policy else (Rule(),)
         study = Study(rules,clock_hz=args.clock_hz,fcs_mode=args.fcs,max_frame=args.frame_limit,
                       allow_zero=not args.strict_udp,interface=args.interface,idle=args.idle)

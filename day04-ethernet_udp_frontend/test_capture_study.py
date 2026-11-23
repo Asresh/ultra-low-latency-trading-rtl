@@ -1,7 +1,8 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -146,6 +147,32 @@ class StudyReportTests(unittest.TestCase):
             self.assertEqual(report["total"]["disposition"],{"OK":1})
             self.assertEqual(len(vectors.read_text().splitlines()),8)
             self.assertTrue(oracle.read_text().endswith(b"through".hex()+"\n"))
+
+    def test_cli_rejects_input_and_output_path_collisions_before_opening(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            capture = root / "wire.pcap"
+            original = pcap([])
+            capture.write_bytes(original)
+            symlink = root / "capture-link"
+            symlink.symlink_to(capture)
+            hardlink = root / "capture-copy"
+            os.link(capture, hardlink)
+            output = root / "vectors.txt"
+            for paths in (
+                ("--output", capture),
+                ("--output", symlink),
+                ("--expected", hardlink),
+                ("--output", output, "--expected", output),
+            ):
+                with self.subTest(paths=paths):
+                    arguments = ["capture_study", str(capture), *map(str, paths)]
+                    stderr = io.StringIO()
+                    with patch("sys.argv", arguments), redirect_stderr(stderr), self.assertRaises(SystemExit):
+                        main()
+                    self.assertIn("aliases", stderr.getvalue())
+                    self.assertEqual(capture.read_bytes(), original)
+                    self.assertFalse(output.exists())
 
     def test_interface_selector_validation(self):
         self.assertEqual(interface_id("2:19"),(2,19))

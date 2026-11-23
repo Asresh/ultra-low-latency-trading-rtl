@@ -48,6 +48,7 @@ class Act(IntEnum):
     BARRIER = 9
     TX_LIMIT = 10
     TX_WAIT = 11
+    QUERY_HEARTBEAT = 12
 
 
 SESSION = b"   SIM1234"
@@ -212,10 +213,21 @@ class Scenario:
 
     def tick(self, count: int) -> None:
         self._action(Act.TICK, count)
+        self._expect_ticks(count)
+
+    def _expect_ticks(self, count: int) -> None:
         for _ in range(count):
             notice, packet = self.device.tick()
             self._check(notice)
             self._tx(packet)
+
+    def query_during_heartbeat(self) -> None:
+        command = Command(Cmd.QUERY, 0, next(self.next_tag))
+        self._action(Act.QUERY_HEARTBEAT, self.device.tx_ticks, payload=command.pack())
+        self._check(self.device.command(command)[0], Status.OK)
+        self._expect_ticks(self.device.tx_ticks)
+        self._check(self.device.command(command)[0], Status.OK)
+        self.barrier()
 
     def kill(self) -> None:
         self.device.kill()
@@ -564,8 +576,7 @@ def login_faults_and_ticks(s: Scenario) -> None:
     s.up()
     s.rx(control("H"), control("H"), control("+", b"beating"), max_keep=8)
     s.barrier()
-    s.tick(4)
-    s.barrier()
+    s.query_during_heartbeat()
     s.rx(control("H"))
     s.barrier()
     s.tick(7)

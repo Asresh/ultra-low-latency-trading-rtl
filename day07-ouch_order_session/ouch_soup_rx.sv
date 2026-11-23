@@ -26,6 +26,7 @@ module ouch_soup_rx (
     body_t packet_body;
     frame_length_t packet_length;
     status_t fault_q;
+    logic bad_keep_pending;
     logic [127:0] append_bytes;
     logic [127:0] retained;
     logic [4:0] after_take;
@@ -35,7 +36,7 @@ module ouch_soup_rx (
     wire in_fire = s_valid && s_ready;
     wire good_keep = s_keep != 0 && ((s_keep & (s_keep + 1'b1)) == 0);
 
-    assign s_ready = !flush && fault_q == ST_OK && stored <= 8;
+    assign s_ready = !flush && fault_q == ST_OK && !bad_keep_pending && stored <= 8;
     assign m_valid = !flush && phase == OUTPUT;
     assign m_packet = {packet_length, packet_body};
     assign fault = fault_q;
@@ -78,42 +79,44 @@ module ouch_soup_rx (
             remaining <= '0;
             phase <= HEADER;
             fault_q <= ST_OK;
-        end else begin
-            if (fault_q == ST_OK && in_fire && !good_keep) begin
-                fault_q <= ST_BAD_KEEP;
-            end else if (fault_q == ST_OK) begin
-                if (in_fire) begin
-                    reservoir <= retained | (append_bytes << (after_take * 8));
-                    stored <= after_take + {1'b0, in_length};
-                end else if (take != 0) begin
-                    reservoir <= retained;
-                    stored <= after_take;
-                end
-
-                case (phase)
-                    HEADER: if (take != 0) begin
-                        if (length_word == 0 || length_word > 16'(MAX_BODY)) begin
-                            fault_q <= ST_FRAME_LENGTH;
-                        end else begin
-                            packet_body <= '0;
-                            packet_length <= frame_length_t'(length_word);
-                            written <= '0;
-                            remaining <= frame_length_t'(length_word);
-                            phase <= BODY;
-                        end
-                    end
-                    BODY: if (take != 0) begin
-                        packet_body <= packet_body | aligned_chunk;
-                        written <= written + frame_length_t'(take);
-                        remaining <= remaining - frame_length_t'(take);
-                        if (frame_length_t'(take) == remaining) phase <= OUTPUT;
-                    end
-                    OUTPUT: if (m_valid && m_ready) phase <= HEADER;
-                    default: phase <= HEADER;
-                endcase
-            end else if (m_valid && m_ready) begin
-                phase <= HEADER;
+            bad_keep_pending <= 1'b0;
+        end else if (fault_q == ST_OK) begin
+            // A bad beat is after every byte already in the reservoir.
+            // Preserve complete preceding frames while fencing new input.
+            if (in_fire && !good_keep)
+                bad_keep_pending <= 1'b1;
+            if (in_fire && good_keep) begin
+                reservoir <= retained | (append_bytes << (after_take * 8));
+                stored <= after_take + {1'b0, in_length};
+            end else if (take != 0) begin
+                reservoir <= retained;
+                stored <= after_take;
             end
+
+            if (bad_keep_pending && phase != OUTPUT && take == 0)
+                fault_q <= ST_BAD_KEEP;
+
+            case (phase)
+                HEADER: if (take != 0) begin
+                    if (length_word == 0 || length_word > 16'(MAX_BODY)) begin
+                        fault_q <= ST_FRAME_LENGTH;
+                    end else begin
+                        packet_body <= '0;
+                        packet_length <= frame_length_t'(length_word);
+                        written <= '0;
+                        remaining <= frame_length_t'(length_word);
+                        phase <= BODY;
+                    end
+                end
+                BODY: if (take != 0) begin
+                    packet_body <= packet_body | aligned_chunk;
+                    written <= written + frame_length_t'(take);
+                    remaining <= remaining - frame_length_t'(take);
+                    if (frame_length_t'(take) == remaining) phase <= OUTPUT;
+                end
+                OUTPUT: if (m_valid && m_ready) phase <= HEADER;
+                default: phase <= HEADER;
+            endcase
         end
     end
 endmodule

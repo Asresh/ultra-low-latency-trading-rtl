@@ -173,9 +173,10 @@ def read_staging(file):
 
 
 def schedule(packet_records, output, endpoints, clock_hz, gap_cycles=0, verify_ipv4=False):
-    lanes = dict(zip(endpoints, range(len(endpoints))))
-    if len(lanes) != 2:
+    endpoints = tuple(endpoints)
+    if len(endpoints) != 2 or endpoints[0] == endpoints[1]:
         raise ValueError("line A and B must have distinct destination endpoints")
+    lanes = {endpoint: lane for lane, endpoint in enumerate(endpoints)}
     if clock_hz <= 0 or gap_cycles < 0:
         raise ValueError("clock must be positive and lane gap must be nonnegative")
     available = [0, 0]
@@ -229,10 +230,13 @@ def main():
     parser.add_argument("--verify-ipv4", action="store_true")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    if args.output and args.output.resolve() == args.capture.resolve():
-        parser.error("capture and output must be different files")
     endpoints = (args.lane_a, args.lane_b)
     try:
+        if args.output and (
+            args.output.resolve() == args.capture.resolve() or
+            (args.output.exists() and args.capture.exists() and args.output.samefile(args.capture))
+        ):
+            parser.error("capture and output must be different files")
         with args.capture.open("rb") as capture:
             if args.output is None:
                 stats = schedule(read_capture(capture), sys.stdout, endpoints,

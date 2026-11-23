@@ -282,12 +282,12 @@ class GatewayModel:
     def _fill(self, req: Request, prior: OpenOrder) -> Status:
         if req.qty > prior.qty:
             return Status.OVERFILL
+        if req.event == self.profile.last_event and req.qty < prior.qty:
+            return Status.EVENT_EXHAUSTED
         new_total = self.executed.get(req.key, 0) + req.price * req.qty
         if new_total > self.profile.max_notional:
             self.halted = True
             return Status.EXEC_OVERFLOW
-        if req.event == self.profile.last_event and req.qty < prior.qty:
-            return Status.EVENT_EXHAUSTED
         self.orders[req.slot] = replace(
             prior, event=req.event, qty=prior.qty - req.qty, ever_filled=True
         )

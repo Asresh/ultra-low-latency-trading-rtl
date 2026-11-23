@@ -225,7 +225,8 @@ module eth_rx_bank #(
                     end else if (captured == 16'd8)
                         mac_source[31:0] <= net_mac[63:32];
                     if (mac_last) begin
-                        wire_length <= capture_oversize ? FRAME_LIMIT[15:0] : capture_end[15:0];
+                        wire_length <= capture_oversize || capture_end > FRAME_LIMIT
+                                      ? FRAME_LIMIT[15:0] : capture_end[15:0];
                         state <= START;
                     end
                 end

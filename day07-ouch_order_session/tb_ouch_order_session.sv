@@ -67,10 +67,11 @@ module tb_ouch_order_session #(
     integer stall_seed;
     integer tx_allowance = -1, tx_beat_count = 0;
     assign m_tx_ready = random_tx_ready && (tx_allowance < 0 || tx_beat_count < tx_allowance);
+    bit hold_notices = 0;
     always @(negedge clk) begin
         stalls <= advance(stalls);
         random_tx_ready <= stalls[2:0] < 5;
-        m_notice_ready <= stalls[7:4] < 10;
+        m_notice_ready <= !hold_notices && stalls[7:4] < 10;
     end
 
     integer tx_file, notice_file, stim_file, capture_file, aborted_file;
@@ -267,6 +268,28 @@ module tb_ouch_order_session #(
         end
     endtask
 
+    task automatic query_during_heartbeat(
+        input logic [CMD_BITS-1:0] command, input integer ticks
+    );
+        integer tx_before;
+        begin
+            tx_before = tx_seen;
+            hold_notices = 1;
+            send_command(command);
+            fork
+                send_command(command);
+                begin
+                    pulse_ticks(ticks);
+                    repeat (32) @(negedge clk);
+                    if (tx_seen != tx_before + 1 || !m_notice_valid ||
+                        !s_cmd_valid || s_cmd_ready)
+                        $fatal(1, "heartbeat missed its deadline while a local query held");
+                    hold_notices = 0;
+                end
+            join
+        end
+    endtask
+
     task automatic kill_once;
         begin
             @(negedge clk);
@@ -394,6 +417,7 @@ module tb_ouch_order_session #(
                 9: inspect_barrier(arg_a, arg_b, value);
                 10: throttle_tx(arg_a);
                 11: wait_for_partial_tx();
+                12: query_during_heartbeat(value[CMD_BITS-1:0], arg_a);
                 default: $fatal(1, "unknown action %0d", action);
             endcase
             stimulus_index = stimulus_index + 1;

@@ -1,11 +1,13 @@
+from contextlib import redirect_stderr
 import io
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from capture_fixtures import enhanced, interface, section
 from capture_io import packets_from
-from capture_replay import bundle, stable_rules, synthetic_input
+from capture_replay import bundle, main, stable_rules, synthetic_input
 from net_scenarios import standard
 from net_wire import MacBeat, Result, Rule
 
@@ -85,6 +87,26 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertEqual(read_text(p/"rt_payload.txt"),[])
             result, = read_text(p/"rt_info.txt")
             self.assertEqual(int(result[1],16)>>376,Result.UDP_ZERO)
+
+    def test_bundle_cli_does_not_overwrite_capture_or_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = root / "rt_rules.txt"
+            original = section() + interface()
+            capture.write_bytes(original)
+            policy = root / "fixture.pcapng"
+            policy_contents = '{"rules":[]}'
+            policy.write_text(policy_contents)
+            for args in (("--capture", str(capture)), ("--synthetic", "--policy", str(policy))):
+                with self.subTest(args=args):
+                    stderr = io.StringIO()
+                    cli = ["capture_replay", "--directory", str(root), *args]
+                    with patch("sys.argv", cli), redirect_stderr(stderr), self.assertRaises(SystemExit):
+                        main()
+                    self.assertIn("aliases", stderr.getvalue())
+                    self.assertEqual(capture.read_bytes(), original)
+                    self.assertEqual(policy.read_text(), policy_contents)
+                    self.assertFalse((root / "rt_mac.txt").exists())
 
 
 if __name__ == "__main__":

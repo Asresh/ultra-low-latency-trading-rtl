@@ -189,11 +189,7 @@ class Checker:
             if desired.pressure_ask:
                 self.metrics["negative_imbalance_cycles"] += 1
 
-            dispatched = self.oracle.publisher.last[bank]
-            pending = (
-                desired.key() if (desired.active or dispatched.active) and desired.key() != dispatched.key()
-                else None
-            )
+            pending = desired.key() if self.oracle.publisher.dirty(bank, desired) else None
             previous_pending = self.unpublished_key[bank]
             if previous_pending is not None and pending != previous_pending:
                 self.per_bank[bank]["coalesced_dirty_transitions"] += 1

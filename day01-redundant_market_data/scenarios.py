@@ -282,6 +282,35 @@ def recovery_case(suite):
     suite.status(81, 81)
 
 
+def recovery_horizon_case(suite):
+    seq = MASK64-5
+    half = 1 << 63
+    suite.config(seq)
+    suite.flow(1)
+    _, item = suite.payloads("DD")
+
+    # A bare half-range heartbeat is ambiguous and must leave the cursor alone.
+    suite.burst([make_packet(SESSION, seq+half)])
+    suite.idle(64)
+    suite.status(seq, seq)
+    suite.no_request()
+
+    # The last unambiguously forward message is outside the window, but its
+    # exclusive watermark lies exactly at the half-range boundary.
+    suite.burst([suite.data(seq+half-1, [item])])
+    suite.idle(80)
+    suite.status(seq, seq+half, gap=1)
+    suite.request(seq, 4)
+
+    # The same modular watermark remains ahead when the head advances.
+    suite.burst([suite.data(seq, [item])])
+    suite.record(seq, [item])
+    suite.idle(32)
+    suite.count()
+    suite.status(seq+1, seq+half, gap=1)
+    suite.stat(4, 1)
+
+
 def randomized_case(suite):
     next_seq = 1000
     suite.config(next_seq)
@@ -380,6 +409,7 @@ def main():
         bad_datagram_case(suite)
         recovery_case(suite)
         randomized_case(suite)
+        recovery_horizon_case(suite)
     suite.write(args.output)
     print(f"Generated {len(suite.events)} expected events and "
           f"{sum(map(len, suite.lanes))} input beats for seed {args.seed}")

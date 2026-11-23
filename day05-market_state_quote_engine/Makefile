@@ -22,8 +22,9 @@ all: test
 
 test: unit differential replay-demo
 
-unit: $(BUILD)/units/quote_publication.vvp $(BUILD)/units/quote_policy.vvp $(BUILD)/units/mbo_book.vvp
+unit: $(BUILD)/units/quote_publication.vvp $(BUILD)/units/quote_reacquire.vvp $(BUILD)/units/quote_policy.vvp $(BUILD)/units/mbo_book.vvp
 	$(VVP) $(BUILD)/units/quote_publication.vvp
+	$(VVP) $(BUILD)/units/quote_reacquire.vvp
 	$(VVP) $(BUILD)/units/quote_policy.vvp
 	$(VVP) $(BUILD)/units/mbo_book.vvp
 	$(PYTHON) -B -m unittest discover -p 'test_market*.py'
@@ -32,7 +33,7 @@ differential: $(BUILD)/$(PROFILE)/engine.vvp
 	$(PYTHON) -B verify_market.py run --profile $(PROFILE) --seed $(SEED) --iterations $(ITERATIONS) \
 		--vvp "$(VVP)" --sim $< --build $(BUILD)/$(PROFILE)
 
-regress:
+regress: unit replay-demo
 	$(MAKE) differential PROFILE=default SEED=7201 ITERATIONS=5000
 	$(MAKE) differential PROFILE=asym SEED=38177 ITERATIONS=5000
 	$(MAKE) differential PROFILE=edge SEED=20283 ITERATIONS=3500
@@ -42,9 +43,13 @@ $(BUILD)/$(PROFILE)/engine.vvp: $(RTL) $(TB).sv market_codes.svh rtl.f market_re
 	mkdir -p $(dir $@)
 	$(IVERILOG) -g2012 -Wall -s $(TB) $(PROFILE_FLAGS) -o $@ -f rtl.f $(TB).sv
 
-$(BUILD)/units/quote_publication.vvp: quote_publication.sv tb_quote_publication.sv
+$(BUILD)/units/quote_publication.vvp: quote_publication.sv quote_publication_pipeline.sv tb_quote_publication.sv
 	mkdir -p $(dir $@)
 	$(IVERILOG) -g2012 -Wall -s tb_quote_publication -o $@ $^
+
+$(BUILD)/units/quote_reacquire.vvp: quote_publication.sv quote_publication_pipeline.sv tb_quote_reacquire.sv
+	mkdir -p $(dir $@)
+	$(IVERILOG) -g2012 -Wall -s tb_quote_reacquire -o $@ $^
 
 $(BUILD)/units/quote_policy.vvp: passive_quote_policy.sv tb_passive_quote_policy.sv market_codes.svh
 	mkdir -p $(dir $@)

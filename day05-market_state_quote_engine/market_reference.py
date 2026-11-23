@@ -548,23 +548,43 @@ class Publisher:
         self.cfg = cfg
         self.last = [Intent()] * cfg.banks
         self.revisions = [0] * cfg.banks
+        self.refresh_needed = [False] * cfg.banks
         self.next_first = 0
         self.output: Optional[Quote] = None
+        self.receipt: Optional[Quote] = None
+
+    def dirty(self, bank: int, present: Intent) -> bool:
+        prior = self.last[bank]
+        if (prior.active or present.active) and prior.key() != present.key():
+            return True
+        has_offer = self.output is not None and self.output.instrument == bank
+        if self.receipt is not None and self.receipt.instrument == bank:
+            refresh = self.receipt.key() != present.key()
+        else:
+            refresh = self.refresh_needed[bank]
+        return present.active and refresh and not has_offer
 
     def choose(self, desired: List[Intent]) -> Optional[int]:
         bank_count = self.cfg.banks
         order = (*range(self.next_first, bank_count), *range(self.next_first))
         for bank in order:
-            prior = self.last[bank]
-            present = desired[bank]
-            if (prior.active or present.active) and prior.key() != present.key():
+            if self.dirty(bank, desired[bank]):
                 return bank
         return None
 
     def advance(self, desired: List[Intent], ready: bool) -> Optional[int]:
-        if self.output is not None and not ready:
+        offer = self.output
+        stalled = offer is not None and not ready
+        selected = None if stalled else self.choose(desired)
+        for bank, current in enumerate(desired):
+            prior = self.last[bank]
+            if self.receipt is not None and self.receipt.instrument == bank:
+                self.refresh_needed[bank] = self.receipt.key() != current.key()
+            elif prior.active and (not current.active or prior.epoch != current.epoch):
+                self.refresh_needed[bank] = True
+        self.receipt = offer if ready and offer is not None and offer.active else None
+        if stalled:
             return None
-        selected = self.choose(desired)
         self.output = None
         if selected is not None:
             intent = desired[selected]

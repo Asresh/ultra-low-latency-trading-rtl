@@ -93,7 +93,7 @@ class Program:
             result = classify(parse_frame(frame, max_frame=self.max_frame, allow_zero=self.allow_zero),
                               self.rules[self.active], self.epoch)
         else:
-            result = Decoded(axis, len(frame), epoch=self.epoch)
+            result = Decoded(axis, min(len(frame), self.max_frame), epoch=self.epoch)
         if expected_result is not None:
             assert result.result == expected_result, (axis, result.result, expected_result)
         self.golden_info.append(result.rx_info())
@@ -259,6 +259,7 @@ def framing_errors(program):
         (replace(packet, options=b"\x01"*36, tags=((0x88a8,1),(0x8100,2))).serialize(), Result.OK),
         (frame.ljust(61,b"\x12"), Result.IP_LENGTH),
         (b"x"*(program.max_frame+7), Result.FRAME_LIMIT),
+        (b"x"*(program.max_frame+25), Result.FRAME_LIMIT),
     ]
     raw = []
     for value, expected in cases:

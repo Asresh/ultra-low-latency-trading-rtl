@@ -15,9 +15,10 @@ Eight independent FPGA hardware projects in the [RTL Projects Everyday](https://
 
 ## Run and inspect
 
-Use Icarus Verilog, Python 3 and GNU Make for simulation. Install the [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build) for Verilator, Yosys and nextpnr.
+Use Icarus Verilog, Python 3 and GNU Make for simulation. The complete verification flow uses the same OSS CAD Suite release as CI, `2026-11-22`. Put that suite's `bin` directory on your `PATH`. [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build)
 
 ```sh
+make verify      # Inventory, simulation, lint, synthesis, formal and netlist checks
 make test        # All scoreboard regressions and the risk/matcher lifecycle
 make lint        # RTL and tops checked per project
 make synth       # Generic synthesis and structural checks
@@ -27,7 +28,7 @@ make route       # Common ECP5 characterization of the original three cores
 make inventory   # Source inventory and per-project minimums
 ```
 
-To run a single project, change into its day folder and run `make test`. See the corresponding README for waveforms, parameter limits, interface fields and golden-model checks.
+To run a single project, change into its day folder and run `make test`. If you switch Icarus versions in the same checkout, use `make clean` before rebuilding so that `vvp` runs binaries compiled by the selected version. See the project README for waveforms, parameter limits, interface fields and golden-model checks.
 
 ## Design evidence
 

@@ -208,7 +208,12 @@ class Decoded:
 
     def rx_info(self):
         if not self.packet:
-            return bit_fields((self.result,8),(0,376)), ((1 << 8)-1) << 376
+            result = int(self.result) << 376
+            mask = 0xff << 376
+            if self.result != Result.BAD_AXIS:
+                result |= self.frame_length << 64
+                mask |= 0xffff << 64
+            return result, mask
         p = self.packet
         tags = tuple(item[1] for item in p.tags)
         outer = tags[0] if tags else 0
@@ -228,7 +233,7 @@ def parse_frame(frame, *, max_frame=1536, allow_zero=True):
     size = len(frame)
 
     def bad(code):
-        return Decoded(code, size)
+        return Decoded(code, min(size, max_frame))
 
     if size > max_frame:
         return bad(Result.FRAME_LIMIT)

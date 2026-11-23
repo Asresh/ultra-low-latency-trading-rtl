@@ -8,11 +8,16 @@ import random
 import zlib
 
 from capture_fixtures import enhanced, interface, section, simple
-from capture_io import CaptureError, packets
+from capture_io import CaptureError, check_output_paths, packets
 from capture_study import Study, interface_id
 from net_scenarios import DST, standard
 from net_wire import Match, Result, Rule, to_beats
 from rule_control import load_policy
+
+
+REPLAY_FILES = (
+    "rt_rules.txt", "rt_mac.txt", "rt_info.txt", "rt_payload.txt", "rt_counts.txt", "rt_report.json",
+)
 
 
 def stable_rules():
@@ -64,14 +69,17 @@ def bundle(capture, directory, rules, *, clock=156250000, fcs="metadata",
     if len(rules) > 8:
         raise ValueError("bundle accepts no more than eight rules")
     padded = rules+(Rule(enabled=False),)*(8-len(rules))
-    (directory/"rt_rules.txt").write_text("\n".join(f"{rule.encode():064x}" for rule in padded)+"\n")
+    config, stimulus_path, meta_path, payload_path, counts_path, report_path = (
+        directory / name for name in REPLAY_FILES
+    )
+    config.write_text("\n".join(f"{rule.encode():064x}" for rule in padded)+"\n")
     study = Study(rules,clock_hz=clock,fcs_mode=fcs,interface=selected_interface,
                   idle=idle,allow_zero=not strict)
     input_count = 0
     expected_count = 0
     body_count = 0
-    with (directory/"rt_mac.txt").open("w") as stimulus, (directory/"rt_info.txt").open("w") as meta, \
-         (directory/"rt_payload.txt").open("w") as payload:
+    with stimulus_path.open("w") as stimulus, meta_path.open("w") as meta, \
+         payload_path.open("w") as payload:
         for frame in capture:
             for replay in study.add(frame):
                 stimulus.write(f"{replay.cycle:d} {replay.capture_serial:d} {replay.beat.row()}\n")
@@ -86,9 +94,9 @@ def bundle(capture, directory, rules, *, clock=156250000, fcs="metadata",
                     for beat in to_beats(result.packet.payload):
                         payload.write(f"{replay.capture_serial:d} {beat.row()}\n")
                         body_count += 1
-    (directory/"rt_counts.txt").write_text(f"{input_count} {expected_count} {body_count}\n")
+    counts_path.write_text(f"{input_count} {expected_count} {body_count}\n")
     report = study.report()
-    (directory/"rt_report.json").write_text(json.dumps(report, indent=2)+"\n")
+    report_path.write_text(json.dumps(report, indent=2)+"\n")
     return report
 
 
@@ -108,11 +116,15 @@ def main():
     args = ap.parse_args()
     try:
         capture_file = args.capture
+        outputs = [args.directory / name for name in REPLAY_FILES]
+        if args.synthetic:
+            capture_file = args.directory / "fixture.pcapng"
+            outputs.append(capture_file)
+        check_output_paths((args.capture, args.policy), outputs)
+        rules = load_policy(args.policy) if args.policy else stable_rules()
         if args.synthetic:
             args.directory.mkdir(exist_ok=True,parents=True)
-            capture_file = args.directory/"fixture.pcapng"
             capture_file.write_bytes(synthetic_input(args.seed))
-        rules = load_policy(args.policy) if args.policy else stable_rules()
         fcs_mode = args.fcs or ("verify" if args.synthetic else "metadata")
         outcome = bundle(packets(capture_file),args.directory,rules,clock=args.clock_hz,
                          fcs=fcs_mode,selected_interface=args.interface,idle=args.idle,

@@ -125,15 +125,21 @@ def arithmetic_limits(s: Scenario) -> None:
     s.order(Op.FILL, BUY, 1, b.generation, 1, p.max_price, 1, Code.OK)
     c = s.order(Op.FILL, BUY, 2, c.generation, 1, p.max_qty, 1, Code.OK)
     assert c.open_notional == 0 and c.executed_notional == p.max_notional
-    d = s.order(Op.NEW, BUY, 3, price=1, qty=1, expected=Code.OK)
+    d = s.order(Op.NEW, BUY, 3, price=1, qty=2, expected=Code.OK)
+    last = p.last_event
+    for event in range(1, last):
+        s.order(Op.AMEND, BUY, 3, d.generation, event, 1, 2, Code.OK)
+    # A nonterminal fill cannot consume the final sequence or latch overflow.
+    late_partial = s.order(Op.FILL, BUY, 3, d.generation, last, 1, 1, Code.EVENT_EXHAUSTED)
+    assert late_partial.event == last - 1 and late_partial.leaves == 2
     e = s.order(Op.NEW, SELL, 4, price=5, qty=4, expected=Code.OK)
-    overflow = s.order(Op.FILL, BUY, 3, d.generation, 1, 1, 1, Code.EXEC_OVERFLOW)
-    assert overflow.live and overflow.event == 0 and overflow.executed_notional == p.max_notional
+    overflow = s.order(Op.FILL, BUY, 3, d.generation, last, 1, 2, Code.EXEC_OVERFLOW)
+    assert overflow.live and overflow.event == last - 1 and overflow.executed_notional == p.max_notional
     s.order(Op.NEW, SELL, 1, price=5, qty=1, expected=Code.HALTED)
     s.order(Op.AMEND, SELL, 4, e.generation, 1, 5, 1, Code.HALTED)
     s.order(Op.FILL, SELL, 4, e.generation, 1, 4, 1, Code.OK)
     s.order(Op.CANCEL, SELL, 4, e.generation, 2, expected=Code.OK)
-    s.order(Op.CANCEL, BUY, 3, d.generation, 1, expected=Code.OK)
+    s.order(Op.CANCEL, BUY, 3, d.generation, last, expected=Code.OK)
 
 
 def emergency_stop(s: Scenario) -> None:

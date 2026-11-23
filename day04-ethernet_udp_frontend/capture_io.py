@@ -23,6 +23,19 @@ class CaptureError(ValueError):
     pass
 
 
+def check_output_paths(inputs, outputs):
+    occupied = [path for path in inputs if path is not None]
+    for output in outputs:
+        if output is None:
+            continue
+        for path in occupied:
+            if output.resolve() == path.resolve() or (
+                output.exists() and path.exists() and output.samefile(path)
+            ):
+                raise ValueError(f"output path {output} aliases {path}")
+        occupied.append(output)
+
+
 @dataclass(frozen=True)
 class CapturePacket:
     serial: int

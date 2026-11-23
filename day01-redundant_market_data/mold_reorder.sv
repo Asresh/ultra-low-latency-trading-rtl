@@ -44,11 +44,12 @@ module mold_reorder #(
     localparam integer SLOT_BITS = $clog2(WINDOW);
     localparam integer TIMER_BITS = $clog2(GAP_TICKS+1);
     localparam integer RECORD_BITS = 16 + MESSAGE_BYTES*8;
+    localparam logic [63:0] HALF_RANGE = 64'h8000_0000_0000_0000;
 
     logic [WINDOW-1:0] present;
     logic [RECORD_BITS-1:0] slots [0:WINDOW-1];
     logic [SLOT_BITS-1:0] target_slot, head_slot, scan_slot;
-    logic [63:0] relative_sequence, hint_sequence, relative_hint, hinted_distance;
+    logic [63:0] relative_sequence, hint_sequence, hinted_distance;
     logic [63:0] hint_from_expected;
     logic [63:0] missing_count;
     logic [15:0] next_request_count;
@@ -62,14 +63,13 @@ module mold_reorder #(
 
     assign relative_sequence = s_sequence - expected_sequence;
     assign hint_sequence = s_kind == DATA ? s_sequence + 64'd1 : s_sequence;
-    assign relative_hint = hint_sequence - high_water;
     assign hint_from_expected = hint_sequence - expected_sequence;
     assign hinted_distance = high_water - expected_sequence;
+    // Only a forward DATA message can prove the exclusive half-range watermark.
     assign update_hint = accept && session_active &&
                          (s_kind == DATA || s_kind == HEARTBEAT || s_kind == END_SESSION) &&
-                         relative_hint != 0 && !relative_hint[63] &&
-                         hint_from_expected != 0 && !hint_from_expected[63] &&
-                         (s_kind != DATA || !relative_sequence[63]);
+                         hint_from_expected > hinted_distance &&
+                         (!hint_from_expected[63] || (s_kind == DATA && !relative_sequence[63]));
 
     assign hit_stale = accept && session_active && s_kind == DATA && relative_sequence[63];
     assign hit_far = accept && session_active && s_kind == DATA
@@ -85,7 +85,7 @@ module mold_reorder #(
     assign {m_length, m_payload} = slots[head_slot];
     assign release_head = m_valid && m_ready;
     assign gap_pending = session_active && !present[head_slot]
-                       && hinted_distance != 0 && !hinted_distance[63];
+                       && hinted_distance != 0 && hinted_distance <= HALF_RANGE;
 
     always @* begin
         missing_count = hinted_distance;

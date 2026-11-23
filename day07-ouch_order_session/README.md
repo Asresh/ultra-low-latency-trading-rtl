@@ -68,7 +68,7 @@ The initial request starts at sequence 1 and can specify a blank session ID. The
 
 A forward jump, wrong session ID, invalid decimal text, or 64-bit cursor overflow closes the transport and retains the committed state. When caught up, the next valid sequenced event advances both cursors by one. Debug and heartbeat packets do not change either cursor. A peer end-of-session packet stops admission until reset. An operator logout emits a complete `O` frame before raising `close_transport` and retains eligibility to reconnect to the same session.
 
-The separate decimal converter takes 64 clocks for binary-to-ASCII and 20 clocks for checked ASCII-to-binary. Login traffic is off the active order update path. A valid `time_tick` advances client and server idle counters, with one unit selected by the integration. With millisecond ticks, the defaults request a client heartbeat after 1,000 idle ticks and declare peer inactivity after 5,000. A zero parameter disables its timer. Client idle time counts when the serializer can take work, and RX holds off timeout while input bytes or a completed frame are pending.
+The separate decimal converter takes 64 clocks for binary-to-ASCII and 20 clocks for checked ASCII-to-binary. Login traffic is off the active order update path. A valid `time_tick` advances client and server idle counters, with one unit selected by the integration. With millisecond ticks, the defaults request a client heartbeat after 1,000 idle ticks and declare peer inactivity after 5,000. A zero parameter disables its timer. A due heartbeat can use an idle serializer even while the application notice channel is held. RX holds off timeout while input bytes or a completed frame are pending.
 
 ## Wire subset
 
@@ -87,7 +87,7 @@ Lengths below are the Soup length field. OUCH integers are network-endian. Fixed
 | Peer to client | `S` | Executed `E`, canceled `C` | 37, 19 or 21 | Incremental execution or cancellation |
 | Peer to client | `S` | Rejected `J`, cancel pending/reject `P`/`I` | 30 or 32, 14 or 16 | Ref-specific rejects and cancel status |
 
-Nonempty OUCH appendages fail closed. The decoder handles the exact mandatory fixed fields and the explicitly allowed omitted or zero-length forms. Other OUCH responses, additional options, multiplexed UserRefIdx, broken trades, short-sale modes, and unsequenced peer application data lie outside this subset. Peer input is bounded to 72 body bytes and any framing error closes the connection without scanning for a new header inside the same byte stream.
+Nonempty OUCH appendages fail closed. The decoder handles the exact mandatory fixed fields and the explicitly allowed omitted or zero-length forms. Other OUCH responses, additional options, multiplexed UserRefIdx, broken trades, short-sale modes, and unsequenced peer application data lie outside this subset. Peer input is bounded to 72 body bytes. A malformed keep mask stops further ingress immediately, lets complete frames from the earlier buffered prefix drain in order, and raises a framing fault. Recovery starts at a new connection boundary.
 
 ## Lifecycle and application contract
 
@@ -136,14 +136,14 @@ python3 ouch_audit.py audit fixtures/audit_example.jsonl --details --fail-on-fau
 ```
 
 - [The Python codec](ouch_protocol.py) uses structured binary layouts. [The lifecycle oracle](ouch_model.py) tracks orders in keyed objects and computes output expectations independently of the RTL.
-- [The integrated scoreboard](tb_ouch_order_session.sv) verifies full TX bytes, parsed lifecycle results, every status/slot/cursor checkpoint, output holds, and exact abandoned TX prefixes on a cut. The default target uses three seeds and table depths 4, 8, and 12.
-- [The framing bench](tb_ouch_framing.sv) checks 649 complete messages in each direction, 73 truncated socket lengths, and all 256 `keep` masks. [The decimal bench](tb_ouch_decimal64.sv) checks 649 conversions and six partial conversion flushes.
+- [The integrated scoreboard](tb_ouch_order_session.sv) verifies full TX bytes, parsed lifecycle results, every status/slot/cursor checkpoint, output holds, and exact abandoned TX prefixes on a cut. The default target uses three seeds and table depths 4, 8, and 12. A directed case keeps a second query blocked by an unconsumed notice while requiring a client heartbeat to complete.
+- [The framing bench](tb_ouch_framing.sv) checks 651 complete messages in each direction, 73 truncated socket lengths, and all 256 `keep` masks. The ordering check holds one complete frame and buffers a second before sending a malformed mask. [The decimal bench](tb_ouch_decimal64.sv) checks 649 conversions and six partial conversion flushes.
 - [The offline auditor](ouch_audit.py) reads local timestamped JSONL `link`, `rx`, `tx`, and `mark` entries. It reports replay, pending refs, cut fragments, latency between captured attempts and replies, and credential-free decoded records. It also independently decodes and compares the hardware test's TX capture against the oracle.
 - `make synth` records a generic structural check and gate netlist. `make timing` maps the default gateway to ECP5 LFE5U-85F / CABGA381 / speed 8 with out-of-context routing and a 100 MHz constraint. The routing command preserves the measured result if it misses the target.
 
 ## Integration and performance boundaries
 
-The default ECP5 run routed at **25.99 MHz**, below the 100 MHz constraint, with 39,075 combinational cells and 10,378 flip-flops. Its critical path runs from assembled RX bytes through decode and order-state update into the order table. A registered decode boundary and separately pipelined slot matching are the next steps to raise the clock at the cost of more event latency. See `build/session-route.json` for the reproducible out-of-context result.
+The pre-audit ECP5 build routed at **25.99 MHz**, below the 100 MHz constraint, with 39,075 combinational cells and 10,378 flip-flops. Its critical path ran from assembled RX bytes through decode and order-state update into the order table. The audited RTL passed generic synthesis with 61,527 cells and zero structural findings. Use `make timing` to generate a fresh ECP5 timing report in `build/session-route.json`.
 
 The 64-bit ready/valid ports accept eight selected bytes in a handshake. Header and frame retirement consume additional clocks. Worst-case packet rate depends on message size, fragmentation, notice backpressure, and the CAM and barrel-shift paths. The raw port width is therefore separate from an achieved payload throughput number. The order table scans for peer refs and should use a banked or indexed lookup when scaled. The timing target excludes TCP, packet I/O, and board routes.
 

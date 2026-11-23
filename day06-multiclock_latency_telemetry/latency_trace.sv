@@ -45,7 +45,8 @@ module latency_trace #(
     wire time_trigger =
         latency_threshold != 0 && sample_status == 3'd1 && sample_latency >= latency_threshold;
     wire trigger_hit = trigger_mask[sample_status] || time_trigger;
-    wire capture_edge = sample_valid && (state == CAPTURE || state == AFTER_TRIGGER);
+    wire arming = arm && !frozen;
+    wire capture_edge = sample_valid && armed && !arming;
     wire [COUNT_W-1:0] captured_next =
         captured == COUNT_W'(DEPTH) ? captured : captured + 1'b1;
     wire [ADDRESS_W-1:0] following_write = writer + 1'b1;
@@ -94,7 +95,7 @@ module latency_trace #(
             traces <= '0;
             threshold_trigger <= 1'b0;
         end else begin
-            if (arm && !frozen) begin
+            if (arming) begin
                 writer <= '0;
                 captured <= '0;
                 state <= CAPTURE;

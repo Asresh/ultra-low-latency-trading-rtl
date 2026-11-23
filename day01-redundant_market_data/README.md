@@ -54,7 +54,7 @@ flowchart LR
 
 Let `E` be the next sequence the reorder window will release, and form the unsigned modulo 2⁶⁴ distance `d = message_sequence - E`. Distances below the window depth can be stored. Different sequences in this range cannot alias the same low-bit index. Distances from the depth through 2⁶³−1 are ahead but outside the window, so the receiver records their existence and drops their payload. Distances of 2⁶³ and above are stale. The head remains in place until the serializer accepts it.
 
-`high_water` is an exclusive sequence watermark learned from validated messages and from heartbeat and end-of-session headers. A gap exists when the head is absent and the watermark lies ahead. After `GAP_TICKS` clocks of that condition, the receiver requests from the missing head through the earliest buffered message, or the watermark if there is no buffered message, capped at `REQUEST_MAX` messages. It holds the request until transfer and repeats after the timeout if the gap remains. If the missing copy arrives while the request is stalled, the pending request still transfers once. Duplicate suppression makes the eventual retransmitted copies safe to admit.
+`high_water` is an exclusive sequence watermark learned from validated messages and from heartbeat and end-of-session headers. A data message at distance 2⁶³−1 proves an exclusive watermark at distance 2⁶³. A bare heartbeat or end-of-session header at distance 2⁶³ is ambiguous and leaves the watermark unchanged. A gap exists when the head is absent and the watermark lies ahead. After `GAP_TICKS` clocks of that condition, the receiver requests from the missing head up to the earliest buffered message, or up to the watermark if there is no buffered message, capped at `REQUEST_MAX` messages. It holds the request until transfer and repeats after the timeout if the gap remains. If the missing copy arrives while the request is stalled, the pending request still transfers once. Duplicate suppression makes the eventual retransmitted copies safe to admit.
 
 ```mermaid
 sequenceDiagram
@@ -139,9 +139,9 @@ For the measured path the final-to-event stages were three clocks for header and
 | --- | --- |
 | Datagram bounds | Incomplete headers, excessive counts/lengths, injected keep and first errors, wrong session, chained lengths through lane boundaries |
 | Packet atomicity | A packet whose final block is truncated or whose last block leaves trailing bytes emits no earlier event |
-| Sequence | Overlap, conflicting duplicate, stale copy, modulo wrap, half-range stale convention, full input banks and future distance beyond the window |
+| Sequence | Overlap, conflicting duplicate, stale copy, modulo wrap, half-range stale convention, exclusive watermark at the forward boundary, full input banks and future distance beyond the window |
 | Recovery | Heartbeat/EOS hints, count cap, continuous retry after timeout, backpressure with eventual gap repair, epoch reset during capture |
-| End-to-end | Two seeds with 627 exact events, 3 request transfers, 111 status checks, and 21 input stall cycles per run |
+| End-to-end | Two seeds with 628 exact events, 4 request transfers, 114 status checks, and 21 input stall cycles per run |
 | Default geometry | 84 exact events, including exact 1,536-byte and 64-block limits, 64-byte body support, and distances 15 and 16 around the default window edge |
 
 The default randomized stream covers 600 ITCH messages over 100 short bursts with independent feed skew, optional overlapping copies and sink stalls. The testbench uses a 256-byte packet bound, 16 blocks, 8 reorder entries, a 48-cycle timeout and request cap 4. The separate default-geometry test runs the synthesis top's default parameters.

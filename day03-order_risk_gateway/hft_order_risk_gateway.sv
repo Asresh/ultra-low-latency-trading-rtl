@@ -313,14 +313,14 @@ module hft_order_risk_gateway #(
                     OP_FILL: begin
                         if (req.qty > slot_q.leaves) begin
                             code = OVERFILL;
+                        end else if (req.event_seq == LAST_EVENT && req.qty != slot_q.leaves) begin
+                            code = EVENT_EXHAUSTED;
                         end else if (executed_after[NOTIONAL_W]) begin
                             code = EXEC_OVERFLOW;
                             fault = 1'b1;
                         end else if (fill_release > slot_q.reserved) begin
                             code = LEDGER_INVARIANT;
                             fault = 1'b1;
-                        end else if (req.event_seq == LAST_EVENT && req.qty != slot_q.leaves) begin
-                            code = EVENT_EXHAUSTED;
                         end else begin
                             ledger_next.executed_amount = executed_after[NOTIONAL_W-1:0];
                             ledger_next.open_amount = ledger_q.open_amount - fill_release;

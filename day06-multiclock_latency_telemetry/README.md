@@ -106,7 +106,7 @@ Defaults are 3 probes, a 16-bit tag, 4 classes, 8 RAM entries plus one read slot
 | Byte offset | Name and behavior |
 | --- | --- |
 | `000,004` | ID `LAT1` and version/probe/class geometry, read-only |
-| `008` | Command bits: 0 arm state, 1 request histogram snapshot, 2 clear transfer counters, 3 flush correlation, 4 commit period shadows, 5 commit timeout shadows, 6 arm trace, 7 latch clock values. Every strobed command-byte write sets the arm state. Disarming an armed fabric also flushes. |
+| `008` | Command bits 0–7 set the arm state, request a histogram snapshot, clear transfer counters, flush correlation, commit the period, commit the timeout, arm the trace, and latch the clock values. Every strobed command-byte write sets the arm state. Disarming an armed fabric also flushes. An accepted trace-arm command starts a fresh capture after that edge, taking priority over a simultaneous trigger. A trace-arm command returns `SLVERR` while a frame is frozen. |
 | `00c` | Status bits: 0 armed, 1 time saturated, 2 invalid rate, 3 histogram busy, 4 trace armed, 5 trace frozen, 6 rate write pending, 7 histogram request pending. |
 | `010,014` | Period integer and fractional shadows. Nonzero 32.32 required on commit. |
 | `018,01c` | Timeout shadow low/high. Requires a positive timeout below 2⁶³. |
@@ -146,14 +146,14 @@ The trace header zeroes bits 319:160. Bits 159:128 hold `LTR1`; 127:96 sequence;
 | CDC FIFO | Two skewed clock ratios, opposite producer/consumer speed, 3,400 total words, reset while full and held egress. |
 | Four-probe burst | 3,600 ordered observations under multi-lane arbitration and 2,755 report stall cycles. Simulated maximum raw-tick lag by lane was 2, 5, 5, and 8 ticks. |
 | Control | 361 writes, 397 reads, disordered AW/W arrival, and 718 edges with both responses valid. The integrated bench also checks fractional rate change, PPS overrun, and old-epoch discard. |
-| Exports | Four exact histogram snapshots with 276 samples, concurrent bank-swap/scrub coverage, two standalone triggered frames, and cross-validation of primary, histogram, and trace frames on the integrated test. |
+| Exports | Four exact histogram snapshots with 276 samples, a simultaneous bank swap and sample, two standalone triggered frames, and cross-validation of the primary stream with both integrated trace frames. The integrated test also aligns a trigger with an accepted trace rearm and verifies that the new capture starts with the next report. |
 | Host tools | 26 unit tests covering fixed-point rounding, invalid encodings, CDF and path budgets, histogram censoring, robust PPS estimation, and 450 independently integrated rate-change intervals. |
 
 The [cycle model](latency_reference.py) and [vector generator](gen_latency_vectors.py) are independent of the RTL storage implementation. [verify_latency_capture.py](verify_latency_capture.py) reconstructs histogram statistics from accepted report ticks and verifies each trace as a contiguous subsequence of the primary stream.
 
 [pps_calibrate.py](pps_calibrate.py) estimates a period from CSV `second,tick[,reference_ns]` using consistent time windows and limits the accepted frequency error. [latency_units.py](latency_units.py) integrates raw intervals across recorded period changes in exact fixed-point units. Its epoch tick is the beginning of the interval that first uses that period. [latency_profile.py](latency_profile.py) compares matched sample distributions for one or more class/probe paths and applies explicit percentile budgets with sample floors. The host code neither assumes evenly sampled input nor interpolates within hardware histogram buckets.
 
-Structural synthesis completed with 74,935 generic cells on the default geometry. This is a portable logical-cell count. The CDC synchronization lag, logical cycles, physical clock frequency, and on-board end-to-end latency are separate measurements. The observed simulation lacks board clocks, physical I/O, noise, and implementation skew.
+Structural synthesis completed with 74,941 generic cells on the default geometry. This is a portable logical-cell count. The CDC synchronization lag, logical cycles, physical clock frequency, and on-board end-to-end latency are separate measurements. The observed simulation lacks board clocks, physical I/O, noise, and implementation skew.
 
 ## Role and reference links
 

@@ -30,9 +30,11 @@ test-default: $(BUILD)/default.vvp
 	$(PYTHON) -B net_scenarios.py --directory $(BUILD)/default --seed 9017 --bursts 40 --default-geometry
 	$(VVP) $< +vectors=$(BUILD)/default
 
-test-replay: $(BUILD)/tb_eth_capture_replay.vvp
+test-replay: $(BUILD)/tb_eth_capture_replay.vvp $(BUILD)/replay-strict.vvp
 	$(PYTHON) -B capture_replay.py --synthetic --directory $(BUILD)/replay
-	$(VVP) $< +vectors=$(BUILD)/replay
+	$(VVP) $(BUILD)/tb_eth_capture_replay.vvp +vectors=$(BUILD)/replay
+	$(PYTHON) -B capture_replay.py --synthetic --strict --directory $(BUILD)/replay-strict
+	$(VVP) $(BUILD)/replay-strict.vvp +vectors=$(BUILD)/replay-strict
 
 test-python:
 	$(PYTHON) -B -m unittest discover -q
@@ -47,6 +49,10 @@ $(BUILD)/tb_%.vvp: tb_%.sv $(RTL) $(HEADERS) rtl.f
 $(BUILD)/strict.vvp: tb_ethernet_udp_frontend.sv $(RTL) $(HEADERS) rtl.f
 	mkdir -p $(BUILD)
 	$(IVERILOG) $(FLAGS) -DSTRICT_UDP -s tb_ethernet_udp_frontend -o $@ -f rtl.f $<
+
+$(BUILD)/replay-strict.vvp: tb_eth_capture_replay.sv $(RTL) $(HEADERS) rtl.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) $(FLAGS) -DSTRICT_UDP -s tb_eth_capture_replay -o $@ -f rtl.f $<
 
 $(BUILD)/default.vvp: tb_ethernet_udp_frontend.sv $(RTL) $(HEADERS) rtl.f
 	mkdir -p $(BUILD)

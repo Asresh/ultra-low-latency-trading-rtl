@@ -167,6 +167,30 @@ module tb_ouch_framing;
         end
     endtask
 
+    task automatic ordered_poison_rx;
+        integer first_byte;
+        integer drained;
+        begin
+            drained = rx_packets;
+            first_byte = bytes_in_script;
+            add_expected(1);
+            add_expected(2);
+            allow_rx = 0;
+            send_chunk(first_byte, 7);
+            wait (out_valid);
+            rx_beat(64'h1234, 8'h02);
+            repeat (4) @(negedge clk);
+            if (rx_fault != ST_OK || rx_packets != drained || !out_valid)
+                $fatal(1, "later malformed beat passed a stalled complete frame");
+            allow_rx = 1;
+            wait_rx(drained + 2);
+            repeat (3) @(negedge clk);
+            if (rx_fault != ST_BAD_KEEP || in_ready || out_valid)
+                $fatal(1, "malformed beat did not close RX after the ordered prefix");
+            transport_reset();
+        end
+    endtask
+
     task automatic rx_beat(input logic [63:0] data, input logic [7:0] keep);
         begin
             @(negedge clk);
@@ -325,6 +349,7 @@ module tb_ouch_framing;
         sweep_rx();
         recovery_rx();
         poison_rx();
+        ordered_poison_rx();
 
         check_tx = 1;
         for (integer i = 0; i < script_packets; i = i + 1)

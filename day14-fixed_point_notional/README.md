@@ -23,6 +23,12 @@ With eight fractional bits, raw price 3,200 represents 12.5 units. Buying two gi
 
 The rounding mode is used twice, first for gross and then for the fee computed from the rounded gross. Modes are floor, ceiling, and nearest with ties to even. The inexact flag means either division had a nonzero remainder, even when it rounded down. The output fields use whole caller-defined cash units.
 
+## Simulation waveform
+
+![The Q8 notional calculator holds a gross of 25, fee of 1 and debit of 26 through a response stall](waveform.svg)
+
+This window shows the first buy from the checked Q8 example tape. At 2195 ns, the core raises response valid with tag `0x3`, gross `0x19`, fee `0x1`, and debit `0x1A`. The result holds until the 2215 ns transfer. The next request transfers at 2225 ns. Run `make waveform` to regenerate the example tape and image and reconcile the captured replies against the model.
+
 ## Interface and errors
 
 | Group | Fields |

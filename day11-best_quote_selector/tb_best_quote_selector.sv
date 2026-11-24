@@ -115,4 +115,13 @@ module tb_best_quote_selector #(
                  cycle_number, INSTRUMENTS, VENUES);
         $finish;
     end
+
+    // Optional trace of the testbench ports for the checked README example.
+    string waveform_path;
+    initial begin
+        if ($value$plusargs("waveform=%s", waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1, tb_best_quote_selector);
+        end
+    end
 endmodule

@@ -232,6 +232,15 @@ module tb_banked_matching_engine #(
             BANKS, accepted, emitted);
         $finish;
     end
+
+    // Optional trace of the testbench ports for the checked README example.
+    string waveform_path;
+    initial begin
+        if ($value$plusargs("waveform=%s", waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1, tb_banked_matching_engine);
+        end
+    end
 endmodule
 
 `default_nettype wire

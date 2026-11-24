@@ -76,3 +76,20 @@ synth: | build
 
 clean:
 	rm -rf build
+
+.PHONY: waveform
+waveform: build/boundaries.vvp
+	$(VVP) $< +wave=build/risk-halt.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/risk-halt.vcd waveform.svg \
+		--start 390 --end 525 --title 'Risk gateway · Halt between admission and commit' \
+		--signal 'tb_risk_boundaries.clk=Clock' \
+		--signal 'tb_risk_boundaries.s_valid=Request valid' \
+		--signal 'tb_risk_boundaries.s_ready=Request ready' \
+		--signal 'tb_risk_boundaries.s_tag=Request tag' \
+		--signal 'tb_risk_boundaries.halt_req=Halt request' \
+		--signal 'tb_risk_boundaries.halted=Halted' \
+		--signal 'tb_risk_boundaries.m_valid=Reply valid' \
+		--signal 'tb_risk_boundaries.m_ready=Reply ready' \
+		--signal 'tb_risk_boundaries.m_tag=Reply tag' \
+		--signal 'tb_risk_boundaries.m_code=Reply code' \
+		--signal 'tb_risk_boundaries.m_open_orders=Open orders'

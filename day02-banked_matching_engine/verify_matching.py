@@ -391,6 +391,7 @@ class TraceChecker:
 # Write one scenario, run the simulator, then replay its measured trace through the scoreboard.
 def verify_scenario(
     scenario: Scenario, profile: Profile, simulator: Path, vvp: str, build: Path,
+    waveform: Optional[Path] = None,
 ) -> Dict:
     name = scenario.name
     commands_path = build / f"{name}.commands.txt"
@@ -403,7 +404,8 @@ def verify_scenario(
     )
     run(
         [vvp, str(simulator), f"+commands={commands_path}",
-         f"+schedule={schedule_path}", f"+trace={trace_path}"],
+         f"+schedule={schedule_path}", f"+trace={trace_path}",
+         *([f"+waveform={waveform}"] if waveform is not None else [])],
         check=True,
     )
     checker = TraceChecker(profile, scenario)
@@ -453,7 +455,8 @@ def run_report(args: argparse.Namespace) -> None:
     build.mkdir(parents=True, exist_ok=True)
     profile = PROFILES[args.profile]
     results = [
-        verify_scenario(scenario, profile, args.sim.resolve(), args.vvp, build)
+        verify_scenario(scenario, profile, args.sim.resolve(), args.vvp, build,
+                        args.waveform if scenario.name == "stress" else None)
         for scenario in scenarios(profile, args.commands, args.seed)
     ]
     report = {
@@ -479,6 +482,7 @@ def arguments() -> argparse.Namespace:
     verify.add_argument("--vvp", default="vvp")
     verify.add_argument("--sim", type=Path, required=True)
     verify.add_argument("--build", type=Path, required=True)
+    verify.add_argument("--waveform", type=Path, help="optional VCD for the checked stress tape")
     report = commands.add_parser("report", help="print Markdown results from a previous run")
     report.add_argument("metrics", type=Path)
     return parser.parse_args()

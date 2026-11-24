@@ -383,6 +383,16 @@ module tb_ouch_order_session #(
     logic [63:0] trailing;
     string directory;
 
+    // Save checked simulation pins when requested by the waveform target.
+    initial begin : waveform_capture
+        string waves_path;
+        if ($value$plusargs("waves=%s", waves_path)) begin
+            $dumpfile(waves_path);
+            $dumpvars(1, tb_ouch_order_session);
+            $dumpvars(1, tb_ouch_order_session.dut);
+        end
+    end
+
     initial begin
         if (!$value$plusargs("vectors=%s", directory))
             $fatal(1, "provide +vectors=DIRECTORY");

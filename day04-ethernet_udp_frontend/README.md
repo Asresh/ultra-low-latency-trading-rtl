@@ -182,3 +182,11 @@ Rule JSON is an object with a `rules` array. For example, `{"rules":[{"dst_ip":"
 The default RX limit is 1,536 bytes and default TX body limit is 1,472 bytes. IPv4 fragments, non-UDP IP traffic and non-IPv4 EtherTypes receive explicit reject results. RX treats IP options as checksummed opaque bytes. TX emits no IP options. ARP, VLAN membership management, PHY/MAC, clock crossings and queue consumers sit outside this block. A dropped last marker requires the upstream path or reset policy to restore framing. Same-address read/write in the paired RAM is avoided by packet-bank ownership.
 
 Trading network engineering work calls for high-speed datapaths, timing and resource analysis, reproducible diagnostics and self-checking verification. This project exercises those tasks at a wire-protocol boundary suitable for preceding a market-data parser or following an execution engine. [Optiver FPGA Engineer](https://www.optiver.com/join-us/jobs/technology/chicago/fpga-engineer/), [Jane Street ASIC Engineer](https://www.janestreet.com/join-jane-street/position/8233259002/)
+
+## Checked simulation waveform
+
+![Ethernet TX · Packet lock during output backpressure](waveform.svg)
+
+Lane 1 presents the first beat at 30 ns. The MAC is stalled, and the arbiter locks its offer at 35 ns. Lane 0 becomes valid at 70 ns. The selected lane and beat stay stable through the initial stall. The first transfer is at 115 ns, and subsequent transfers continue on lane 1 as its packet advances.
+
+Run `make waveform` in this directory to rerun the checked bench and regenerate this cropped SVG. The full VCD is saved under `build/`.

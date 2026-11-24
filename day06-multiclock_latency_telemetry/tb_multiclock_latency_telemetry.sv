@@ -263,6 +263,16 @@ module tb_multiclock_latency_telemetry;
         end
     endtask
 
+    // Save checked simulation pins when requested by the waveform target.
+    initial begin : waveform_capture
+        string waves_path;
+        if ($value$plusargs("waves=%s", waves_path)) begin
+            $dumpfile(waves_path);
+            $dumpvars(1, tb_multiclock_latency_telemetry);
+            $dumpvars(1, tb_multiclock_latency_telemetry.dut);
+        end
+    end
+
     initial begin : scenario
         logic [31:0] value;
         logic [63:0] ns_before;

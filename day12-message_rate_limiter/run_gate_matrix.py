@@ -182,10 +182,12 @@ def run(args):
     (args.output / "elaboration.log").write_text(command.stdout + command.stderr, encoding="utf-8")
     if command.returncode:
         raise RuntimeError(f"gate compilation failed. See {args.output / 'elaboration.log'}")
-    subprocess.run(
-        command_words(args.vvp) + [str(binary), f"+source={drivers}", f"+sink={actual_file}"],
-        check=True,
-    )
+    arguments = command_words(args.vvp) + [
+        str(binary), f"+source={drivers}", f"+sink={actual_file}",
+    ]
+    if args.wave is not None:
+        arguments.append(f"+wave={args.wave}")
+    subprocess.run(arguments, check=True)
     compare_capture(plan, actual_file)
     must_cover = {
         "audit_before_data", "data_before_audit", "same_edge_sinks", "in_place_replacement",
@@ -208,6 +210,7 @@ def main():
     parser.add_argument("--seed", type=int, default=315)
     parser.add_argument("--operations", type=int, default=400)
     parser.add_argument("--output", type=Path, default=Path("build/gate"))
+    parser.add_argument("--wave", type=Path, help="capture the same checked run as VCD")
     args = parser.parse_args()
     if args.seed < 0 or args.operations < 0:
         parser.error("seed and operation count must be nonnegative")

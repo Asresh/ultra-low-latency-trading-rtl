@@ -1,6 +1,6 @@
 # Ultra Low Latency Trading RTL
 
-Thirteen independent FPGA hardware projects in the [RTL Projects Everyday](https://github.com/Asresh/RTL-Projects-Everyday) format. Each day folder puts synthesizable SystemVerilog, self-checking verification, a Makefile, and a design README together. Days 01–08 cover trading subsystems. Days 10–14 each teach a smaller reusable hardware building block with a detailed test suite.
+Sixteen independent FPGA hardware projects in the [RTL Projects Everyday](https://github.com/Asresh/RTL-Projects-Everyday) format. Each implemented day folder contains synthesizable SystemVerilog, self-checking verification, a Makefile, and a README with a waveform captured from simulation. Days 01–08 cover trading subsystems, Days 10–14 teach reusable building blocks, and Days 15–17 cover market-data distribution, order egress, and execution reconciliation.
 
 | Day | Project | Design problem |
 | --- | --- | --- |
@@ -18,6 +18,9 @@ Thirteen independent FPGA hardware projects in the [RTL Projects Everyday](https
 | 12 | [Message rate limiter](day12-message_rate_limiter/) | Admit messages with a per-key token bucket and test burst capacity, refill, and backpressure. |
 | 13 | [Timestamped stream replayer](day13-timestamped_stream_replayer/) | Load a short event tape and replay it on a clock under pause and output stalls. |
 | 14 | [Fixed-point notional calculator](day14-fixed_point_notional/) | Compute quantity times price, round fees and cash amounts, and check a cash limit. |
+| 15 | [Multicast packet fanout](day15-multicast_packet_fanout/) | Distribute copies of normalized feed packets to independently backpressured consumers. |
+| 16 | [Credit-aware order egress scheduler](day16-credit_order_scheduler/) | Schedule queued orders across sessions with finite credits and bounded priority for control traffic. |
+| 17 | [Drop-copy reconciliation](day17-drop_copy_reconciliation/) | Compare normalized execution reports from an order session and its independent drop-copy stream. |
 
 Days 10–14 each have at least 5,001 substantive source lines across RTL, verification, and tools. Comments, docstrings, blank lines, generated artifacts, and READMEs are excluded from the count. Python functions and SystemVerilog functions and tasks have explanations at their definitions.
 
@@ -34,9 +37,10 @@ make formal      # FIFO, arbiter, risk-ledger, and market-state properties
 make netlist-check # Compare a synthesized gateway against the transaction oracle
 make route       # Common ECP5 characterization of the original three cores
 make inventory   # Source inventory and per-project minimums
+make waveform    # Rerun the waveform benches and regenerate the README images
 ```
 
-To run a single project, change into its day folder and run `make test`. If you switch Icarus versions in the same checkout, use `make clean` before rebuilding so that `vvp` runs binaries compiled by the selected version. See the project README for waveforms, parameter limits, interface fields and golden-model checks.
+To run a single project, change into its day folder and run `make test`. Run `make waveform` there to regenerate its README image and leave the VCD under `build/`. The drawings show selected windows from the checked simulations. If you switch Icarus versions in the same checkout, use `make clean` before rebuilding so that `vvp` runs binaries compiled by the selected version.
 
 ## Design evidence
 

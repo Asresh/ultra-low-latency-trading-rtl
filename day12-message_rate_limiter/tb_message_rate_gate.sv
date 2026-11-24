@@ -87,6 +87,15 @@ module tb_message_rate_gate;
         clk = 0;
     endtask
 
+    // A requested capture records checked simulation signals for the README.
+    initial begin : optional_waveform
+        string wave_path;
+        if ($value$plusargs("wave=%s", wave_path)) begin
+            $dumpfile(wave_path);
+            $dumpvars(2, tb_message_rate_gate);
+        end
+    end
+
     initial begin
         if (!$value$plusargs("source=%s", source) || !$value$plusargs("sink=%s", sink))
             $fatal(1, "provide +source and +sink gate paths");

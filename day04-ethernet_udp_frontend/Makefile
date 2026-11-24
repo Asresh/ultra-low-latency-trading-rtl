@@ -70,3 +70,17 @@ synth:
 
 clean:
 	rm -rf $(BUILD) __pycache__ obj_dir
+
+.PHONY: waveform
+waveform: $(BUILD)/tb_eth_packet_arbiter.vvp
+	$(VVP) $< +wave=$(BUILD)/packet-arbiter.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/packet-arbiter.vcd waveform.svg \
+		--start 20 --end 155 --title 'Ethernet TX · Packet lock during output backpressure' \
+		--signal 'tb_eth_packet_arbiter.clk=Clock' \
+		--signal 'tb_eth_packet_arbiter.in_valid=Lane valid mask' \
+		--signal 'tb_eth_packet_arbiter.in_ready=Lane ready mask' \
+		--signal 'tb_eth_packet_arbiter.out_valid=MAC valid' \
+		--signal 'tb_eth_packet_arbiter.out_ready=MAC ready' \
+		--signal 'tb_eth_packet_arbiter.out_lane=Selected lane' \
+		--signal 'tb_eth_packet_arbiter.dut.locked=Packet locked' \
+		--signal 'tb_eth_packet_arbiter.out_data=MAC beat'

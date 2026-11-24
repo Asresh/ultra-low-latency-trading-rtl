@@ -42,11 +42,12 @@ def ensure_parents(paths):
         Path(path).parent.mkdir(exist_ok=True, parents=True)
 
 
-def simulation(vvp, image, drive_path, trace_path):
+def simulation(vvp, image, drive_path, trace_path, waveform=None):
     """Run the independent RTL process, reporting tool failures with captured output."""
     arguments = [
         vvp, str(image), f"+input={Path(drive_path).resolve()}",
         f"+output={Path(trace_path).resolve()}",
+        *([f"+waveform={Path(waveform).resolve()}"] if waveform is not None else []),
     ]
     finished = subprocess.run(arguments, capture_output=True, text=True, check=False)
     if finished.returncode:

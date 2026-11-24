@@ -44,3 +44,19 @@ synth:
 
 clean:
 	rm -rf $(BUILD) __pycache__
+
+.PHONY: waveform
+
+waveform: build/market_data.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B scenarios.py --output $(BUILD)/waveform --seed 7201
+	$(VVP) $< +vectors=$(BUILD)/waveform +waveform=$(BUILD)/redundant_market_data.vcd
+	mkdir -p docs
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/redundant_market_data.vcd docs/waveform.svg \
+		--start 45 --end 280 --title 'Day 01 · Duplicate packets produce one event' \
+		--signal 'tb_redundant_market_data.clk=Clock' \
+		--signal 'tb_redundant_market_data.feed_valid=Feed valid A/B' \
+		--signal 'tb_redundant_market_data.feed_ready=Feed ready A/B' \
+		--signal 'tb_redundant_market_data.feed_last=Feed last A/B' \
+		--signal 'tb_redundant_market_data.expected_sequence=Next sequence' \
+		--signal 'tb_redundant_market_data.event_valid=Event valid' \
+		--signal 'tb_redundant_market_data.event_ready=Event ready'

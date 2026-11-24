@@ -12,7 +12,7 @@ CASES := $(foreach depth,$(DEPTHS),$(BUILD)/depth-$(depth).verified)
 TRAFFIC := dense sparse mixed
 EXPERIMENTS := $(foreach traffic,$(TRAFFIC),$(BUILD)/$(traffic).verified)
 
-.PHONY: all test lint synth formal demo clean
+.PHONY: all test lint synth formal demo waveform clean
 all: test
 
 $(BUILD):
@@ -55,6 +55,18 @@ formal: | $(BUILD)
 
 demo: $(BUILD)/depth-16.verified
 	$(PYTHON) -B replay_cli.py metrics $(BUILD)/depth-16.stim $(BUILD)/depth-16.trace | head -60
+
+WAVE_SCOPE := tb_timestamped_stream_replayer
+waveform: $(BUILD)/depth-16.vvp $(BUILD)/depth-16.stim
+	$(VVP) $(BUILD)/depth-16.vvp +stim=$(BUILD)/depth-16.stim +trace=$(BUILD)/waveform.trace +waveform=$(BUILD)/replay-waveform.vcd
+	$(PYTHON) -B replay_audit.py --depth 16 --directed $(BUILD)/depth-16.stim $(BUILD)/waveform.trace
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/replay-waveform.vcd waveform.svg \
+		--start 590 --end 950 --title "Replay holds a pending beat through pause and stop" \
+		--signal '$(WAVE_SCOPE).clk=Clock' --signal '$(WAVE_SCOPE).cfg_valid=Command valid' \
+		--signal '$(WAVE_SCOPE).cfg_op=Command opcode' --signal '$(WAVE_SCOPE).paused=Paused' \
+		--signal '$(WAVE_SCOPE).now_tick=Virtual tick' --signal '$(WAVE_SCOPE).m_valid=Output valid' \
+		--signal '$(WAVE_SCOPE).m_ready=Sink ready' --signal '$(WAVE_SCOPE).m_tag=Output tag' \
+		--signal '$(WAVE_SCOPE).done=Done'
 
 clean:
 	rm -rf $(BUILD)

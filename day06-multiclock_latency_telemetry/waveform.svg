@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="512" viewBox="0 0 1160 512" role="img" aria-labelledby="wave-title">
+<title id="wave-title">Cross-clock tag pairing and duplicate start</title>
+<style>
+text{fill:#12253b;font:13px ui-monospace,Menlo,Consolas,monospace}
+.title{font:600 24px system-ui,sans-serif}
+.sub,.axis{fill:#42566b}
+.ruler{stroke:#d2dfe8;stroke-width:1}
+.trace,.edge{fill:none;stroke:#06756f;stroke-width:2.3}
+.edge{opacity:.7}
+.unknown{fill:none;stroke:#987542;stroke-width:2;stroke-dasharray:4 3}
+.bus{fill:#e1f3ef;stroke:#06756f;stroke-width:1.5}
+.gap{fill:#fff2d6;stroke:#987542}
+.value{font-size:12px}
+</style>
+<rect width="100%" height="100%" rx="14" fill="#f5f9fc"/>
+<text x="28.00" y="38.00" class="title" text-anchor="start">Cross-clock tag pairing and duplicate start</text>
+<text x="28.00" y="64.00" class="sub" text-anchor="start">RTL simulation · bus values in hex · X/Z shown in amber</text>
+<rect x="22" y="80" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="105.00" class="" text-anchor="start">Reference Clock</text>
+<text x="32.00" y="148.00" class="" text-anchor="start">Probe Valid Mask</text>
+<rect x="22" y="166" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="191.00" class="" text-anchor="start">Probe End Mask</text>
+<text x="32.00" y="234.00" class="" text-anchor="start">Report Tag</text>
+<rect x="22" y="252" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="277.00" class="" text-anchor="start">Report Status</text>
+<text x="32.00" y="320.00" class="" text-anchor="start">Latency (ns)</text>
+<rect x="22" y="338" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="363.00" class="" text-anchor="start">Report Valid</text>
+<text x="32.00" y="406.00" class="" text-anchor="start">Reports Accepted</text>
+<path class="ruler" d="M218.00 80V426"/>
+<text x="218.00" y="450.00" class="axis" text-anchor="middle">1535</text>
+<path class="ruler" d="M537.38 80V426"/>
+<text x="537.38" y="450.00" class="axis" text-anchor="middle">1600</text>
+<path class="ruler" d="M783.05 80V426"/>
+<text x="783.05" y="450.00" class="axis" text-anchor="middle">1650</text>
+<path class="ruler" d="M1127.00 80V426"/>
+<text x="1127.00" y="450.00" class="axis" text-anchor="middle">1720</text>
+<path class="trace" d="M218.00 89.00H242.57"/>
+<path class="edge" d="M242.57 89.00V111.00"/>
+<path class="trace" d="M242.57 111.00H267.14"/>
+<path class="edge" d="M267.14 111.00V89.00"/>
+<path class="trace" d="M267.14 89.00H291.70"/>
+<path class="edge" d="M291.70 89.00V111.00"/>
+<path class="trace" d="M291.70 111.00H316.27"/>
+<path class="edge" d="M316.27 111.00V89.00"/>
+<path class="trace" d="M316.27 89.00H340.84"/>
+<path class="edge" d="M340.84 89.00V111.00"/>
+<path class="trace" d="M340.84 111.00H365.41"/>
+<path class="edge" d="M365.41 111.00V89.00"/>
+<path class="trace" d="M365.41 89.00H389.97"/>
+<path class="edge" d="M389.97 89.00V111.00"/>
+<path class="trace" d="M389.97 111.00H414.54"/>
+<path class="edge" d="M414.54 111.00V89.00"/>
+<path class="trace" d="M414.54 89.00H439.11"/>
+<path class="edge" d="M439.11 89.00V111.00"/>
+<path class="trace" d="M439.11 111.00H463.68"/>
+<path class="edge" d="M463.68 111.00V89.00"/>
+<path class="trace" d="M463.68 89.00H488.24"/>
+<path class="edge" d="M488.24 89.00V111.00"/>
+<path class="trace" d="M488.24 111.00H512.81"/>
+<path class="edge" d="M512.81 111.00V89.00"/>
+<path class="trace" d="M512.81 89.00H537.38"/>
+<path class="edge" d="M537.38 89.00V111.00"/>
+<path class="trace" d="M537.38 111.00H561.95"/>
+<path class="edge" d="M561.95 111.00V89.00"/>
+<path class="trace" d="M561.95 89.00H586.51"/>
+<path class="edge" d="M586.51 89.00V111.00"/>
+<path class="trace" d="M586.51 111.00H611.08"/>
+<path class="edge" d="M611.08 111.00V89.00"/>
+<path class="trace" d="M611.08 89.00H635.65"/>
+<path class="edge" d="M635.65 89.00V111.00"/>
+<path class="trace" d="M635.65 111.00H660.22"/>
+<path class="edge" d="M660.22 111.00V89.00"/>
+<path class="trace" d="M660.22 89.00H684.78"/>
+<path class="edge" d="M684.78 89.00V111.00"/>
+<path class="trace" d="M684.78 111.00H709.35"/>
+<path class="edge" d="M709.35 111.00V89.00"/>
+<path class="trace" d="M709.35 89.00H733.92"/>
+<path class="edge" d="M733.92 89.00V111.00"/>
+<path class="trace" d="M733.92 111.00H758.49"/>
+<path class="edge" d="M758.49 111.00V89.00"/>
+<path class="trace" d="M758.49 89.00H783.05"/>
+<path class="edge" d="M783.05 89.00V111.00"/>
+<path class="trace" d="M783.05 111.00H807.62"/>
+<path class="edge" d="M807.62 111.00V89.00"/>
+<path class="trace" d="M807.62 89.00H832.19"/>
+<path class="edge" d="M832.19 89.00V111.00"/>
+<path class="trace" d="M832.19 111.00H856.76"/>
+<path class="edge" d="M856.76 111.00V89.00"/>
+<path class="trace" d="M856.76 89.00H881.32"/>
+<path class="edge" d="M881.32 89.00V111.00"/>
+<path class="trace" d="M881.32 111.00H905.89"/>
+<path class="edge" d="M905.89 111.00V89.00"/>
+<path class="trace" d="M905.89 89.00H930.46"/>
+<path class="edge" d="M930.46 89.00V111.00"/>
+<path class="trace" d="M930.46 111.00H955.03"/>
+<path class="edge" d="M955.03 111.00V89.00"/>
+<path class="trace" d="M955.03 89.00H979.59"/>
+<path class="edge" d="M979.59 89.00V111.00"/>
+<path class="trace" d="M979.59 111.00H1004.16"/>
+<path class="edge" d="M1004.16 111.00V89.00"/>
+<path class="trace" d="M1004.16 89.00H1028.73"/>
+<path class="edge" d="M1028.73 89.00V111.00"/>
+<path class="trace" d="M1028.73 111.00H1053.30"/>
+<path class="edge" d="M1053.30 111.00V89.00"/>
+<path class="trace" d="M1053.30 89.00H1077.86"/>
+<path class="edge" d="M1077.86 89.00V111.00"/>
+<path class="trace" d="M1077.86 111.00H1102.43"/>
+<path class="edge" d="M1102.43 111.00V89.00"/>
+<path class="trace" d="M1102.43 89.00H1127.00"/>
+<path class="edge" d="M1127.00 89.00V111.00"/>
+<path class="bus" d="M218.00 143.00L223.00 131.00H247.39L252.39 143.00L247.39 155.00H223.00Z"/>
+<text x="235.20" y="147.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M252.39 143.00L257.39 131.00H276.88L281.88 143.00L276.88 155.00H257.39Z"/>
+<path class="bus" d="M281.88 143.00L286.88 131.00H542.21L547.21 143.00L542.21 155.00H286.88Z"/>
+<text x="414.54" y="147.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M547.21 143.00L552.21 131.00H571.69L576.69 143.00L571.69 155.00H552.21Z"/>
+<path class="bus" d="M576.69 143.00L581.69 131.00H856.67L861.67 143.00L856.67 155.00H581.69Z"/>
+<text x="719.18" y="147.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M861.67 143.00L866.67 131.00H925.46L930.46 143.00L925.46 155.00H866.67Z"/>
+<text x="896.06" y="147.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M930.46 143.00L935.46 131.00H1122.00L1127.00 143.00L1122.00 155.00H935.46Z"/>
+<text x="1028.73" y="147.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M218.00 186.00L223.00 174.00H856.67L861.67 186.00L856.67 198.00H223.00Z"/>
+<text x="539.84" y="190.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M861.67 186.00L866.67 174.00H1122.00L1127.00 186.00L1122.00 198.00H866.67Z"/>
+<text x="994.34" y="190.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M218.00 229.00L223.00 217.00H458.68L463.68 229.00L458.68 241.00H223.00Z"/>
+<text x="340.84" y="233.00" class="value" text-anchor="middle">0x9</text>
+<path class="bus" d="M463.68 229.00L468.68 217.00H1122.00L1127.00 229.00L1122.00 241.00H468.68Z"/>
+<text x="795.34" y="233.00" class="value" text-anchor="middle">0x37</text>
+<path class="bus" d="M218.00 272.00L223.00 260.00H458.68L463.68 272.00L458.68 284.00H223.00Z"/>
+<text x="340.84" y="276.00" class="value" text-anchor="middle">0x6</text>
+<path class="bus" d="M463.68 272.00L468.68 260.00H753.49L758.49 272.00L753.49 284.00H468.68Z"/>
+<text x="611.08" y="276.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M758.49 272.00L763.49 260.00H1048.30L1053.30 272.00L1048.30 284.00H763.49Z"/>
+<text x="905.89" y="276.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M1053.30 272.00L1058.30 260.00H1122.00L1127.00 272.00L1122.00 284.00H1058.30Z"/>
+<text x="1090.15" y="276.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M218.00 315.00L223.00 303.00H1048.30L1053.30 315.00L1048.30 327.00H223.00Z"/>
+<text x="635.65" y="319.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M1053.30 315.00L1058.30 303.00H1122.00L1127.00 315.00L1122.00 327.00H1058.30Z"/>
+<text x="1090.15" y="319.00" class="value" text-anchor="middle">0xA</text>
+<path class="trace" d="M218.00 369.00H463.68"/>
+<path class="edge" d="M463.68 369.00V347.00"/>
+<path class="trace" d="M463.68 347.00H512.81"/>
+<path class="edge" d="M512.81 347.00V369.00"/>
+<path class="trace" d="M512.81 369.00H758.49"/>
+<path class="edge" d="M758.49 369.00V347.00"/>
+<path class="trace" d="M758.49 347.00H807.62"/>
+<path class="edge" d="M807.62 347.00V369.00"/>
+<path class="trace" d="M807.62 369.00H1053.30"/>
+<path class="edge" d="M1053.30 369.00V347.00"/>
+<path class="trace" d="M1053.30 347.00H1102.43"/>
+<path class="edge" d="M1102.43 347.00V369.00"/>
+<path class="trace" d="M1102.43 369.00H1127.00"/>
+<path class="bus" d="M218.00 401.00L223.00 389.00H507.81L512.81 401.00L507.81 413.00H223.00Z"/>
+<text x="365.41" y="405.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M512.81 401.00L517.81 389.00H802.62L807.62 401.00L802.62 413.00H517.81Z"/>
+<text x="660.22" y="405.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M807.62 401.00L812.62 389.00H1097.43L1102.43 401.00L1097.43 413.00H812.62Z"/>
+<text x="955.03" y="405.00" class="value" text-anchor="middle">0x3</text>
+<path class="bus" d="M1102.43 401.00L1107.43 389.00H1122.00L1127.00 401.00L1122.00 413.00H1107.43Z"/>
+<text x="1127.00" y="476.00" class="axis" text-anchor="end">Time (ns)</text>
+</svg>

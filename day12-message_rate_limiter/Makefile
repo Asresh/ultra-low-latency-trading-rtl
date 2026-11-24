@@ -53,3 +53,20 @@ formal: | build
 
 clean:
 	rm -rf build
+
+.PHONY: waveform
+waveform:
+	$(PYTHON) -B run_gate_matrix.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" --wave build/forwarding-gate.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/forwarding-gate.vcd waveform.svg \
+		--start 11 --end 60 --title 'Rate gate · Independent audit and payload handshakes' \
+		--signal 'tb_message_rate_gate.clk=Clock' \
+		--signal 'tb_message_rate_gate.s_valid=Request valid' \
+		--signal 'tb_message_rate_gate.s_ready=Request ready' \
+		--signal 'tb_message_rate_gate.s_tag=Request tag' \
+		--signal 'tb_message_rate_gate.audit_valid=Audit valid' \
+		--signal 'tb_message_rate_gate.audit_ready=Audit ready' \
+		--signal 'tb_message_rate_gate.audit_tag=Audit tag' \
+		--signal 'tb_message_rate_gate.audit_status=Audit status' \
+		--signal 'tb_message_rate_gate.out_valid=Forward valid' \
+		--signal 'tb_message_rate_gate.out_ready=Forward ready' \
+		--signal 'tb_message_rate_gate.out_tag=Forward tag'

@@ -61,6 +61,15 @@ module tb_quote_reacquire;
             $fatal(1, "active offer unexpectedly has quote reason %0d", q_reason);
     endtask
 
+    // A requested capture records checked simulation signals for the README.
+    initial begin : optional_waveform
+        string wave_path;
+        if ($value$plusargs("wave=%s", wave_path)) begin
+            $dumpfile(wave_path);
+            $dumpvars(2, tb_quote_reacquire);
+        end
+    end
+
     initial begin
         sample_edge();
         @(negedge clk);

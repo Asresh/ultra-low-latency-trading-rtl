@@ -1,0 +1,24 @@
+[tasks]
+assertions
+examples
+
+[options]
+assertions: mode bmc
+assertions: depth 16
+examples: mode cover
+examples: depth 16
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+read_slang --top formal_drop_copy -I. drop_copy_reconciliation.sv formal_drop_copy.sv
+prep -top formal_drop_copy
+memory_map
+opt -full
+
+[files]
+drop_copy_reconciliation.sv
+reconcile_defs.svh
+formal_drop_copy.sv

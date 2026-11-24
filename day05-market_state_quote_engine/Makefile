@@ -100,3 +100,17 @@ formal:
 
 clean:
 	rm -rf $(BUILD)
+
+.PHONY: waveform
+waveform: $(BUILD)/units/quote_reacquire.vvp
+	$(VVP) $< +wave=$(BUILD)/quote-reacquire.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/quote-reacquire.vcd waveform.svg \
+		--start 25 --end 80 --title 'Quote intents · Stale transfer and revision on reacquisition' \
+		--signal 'tb_quote_reacquire.clk=Clock' \
+		--signal 'tb_quote_reacquire.q_valid=Quote valid' \
+		--signal 'tb_quote_reacquire.q_ready=Quote ready' \
+		--signal 'tb_quote_reacquire.q_current=Quote current' \
+		--signal 'tb_quote_reacquire.q_instrument=Instrument' \
+		--signal 'tb_quote_reacquire.q_revision=Revision' \
+		--signal 'tb_quote_reacquire.q_size=Quote size' \
+		--signal 'tb_quote_reacquire.q_bid=Quote bid'

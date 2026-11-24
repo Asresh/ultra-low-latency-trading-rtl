@@ -148,3 +148,11 @@ The audited ECP5 build routed at **27.49 MHz**, below the 100 MHz constraint, wi
 The 64-bit ready/valid ports accept eight selected bytes in a handshake. Header and frame retirement consume additional clocks. Worst-case packet rate depends on message size, fragmentation, notice backpressure, and the CAM and barrel-shift paths. The raw port width is therefore separate from an achieved payload throughput number. The order table scans for peer refs and should use a banked or indexed lookup when scaled. The timing target excludes TCP, packet I/O, and board routes.
 
 The core operates on synthetic bytes or an adapter supplied by the integrator. It does not open external connections or provision accounts. A production integration would need a durable checkpoint and journal, venue certification, system-level safety limits, and a separately validated TCP/network path. Reset ends this model's durable session in memory.
+
+## From the RTL simulation
+
+![OUCH replay catches up before the live cursor advances](waveform.svg)
+
+The directed reconnect requests replay from sequence 2 while the saved live cursor is 4. A retry made during replay yields a local notice at 13685 ns. The server replays earlier messages while the live cursor stays at 4. Replay clears at 14265 ns, the retried command can transmit, and its next live server message advances the cursor to 5 at 14945 ns. The test checks parsed state, notices and transmitted wire bytes.
+
+Run `make waveform` to rerun the checked scenario and regenerate the figure. The full capture is available at `build/wave/session.vcd`.

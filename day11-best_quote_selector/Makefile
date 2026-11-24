@@ -52,3 +52,20 @@ test: demo
 
 demo: build/default.vvp
 	$(PYTHON) -B quote_demo.py --image build/default.vvp --vvp "$(VVP)"
+
+.PHONY: waveform
+
+waveform: build/default.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B quote_demo.py --image $< --output build/waveform --vvp "$(VVP)" --waveform build/best_quote_selector.vcd
+	mkdir -p docs
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/best_quote_selector.vcd docs/waveform.svg \
+		--start 8 --end 49 --title 'Day 11 · Quote updates and a crossed market' \
+		--signal 'tb_best_quote_selector.clk=Clock' \
+		--signal 'tb_best_quote_selector.cmd_valid=Update valid' \
+		--signal 'tb_best_quote_selector.query_valid=Query valid' \
+		--signal 'tb_best_quote_selector.result_valid=Result valid' \
+		--signal 'tb_best_quote_selector.result_tag=Query tag' \
+		--signal 'tb_best_quote_selector.result_state=Market state' \
+		--signal 'tb_best_quote_selector.result_bid_price=Best bid' \
+		--signal 'tb_best_quote_selector.result_ask_price=Best ask' \
+		--signal 'tb_best_quote_selector.result_spread=Signed spread bits'

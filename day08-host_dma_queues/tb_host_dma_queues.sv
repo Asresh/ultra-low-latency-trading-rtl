@@ -416,6 +416,16 @@ module tb_host_dma_queues;
         end
     endtask
 
+    // Save checked simulation pins when requested by the waveform target.
+    initial begin : waveform_capture
+        string waves_path;
+        if ($value$plusargs("waves=%s", waves_path)) begin
+            $dumpfile(waves_path);
+            $dumpvars(1, tb_host_dma_queues);
+            $dumpvars(1, tb_host_dma_queues.dut);
+        end
+    end
+
     initial begin : run
         logic [31:0] crc_a, crc_b;
         logic [31:0] saved_sq, saved_cq;

@@ -58,3 +58,11 @@ python3 width_excerpt.py epochs build/up.wgc
 ```
 
 All clocks and latencies in this project describe simulation handshakes. Generic synthesis checks elaboration and structure.
+
+## Checked RTL waveform
+
+![Timing waveform from the self-checking RTL simulation](docs/waveform.svg)
+
+The first two accepted input beats have masks `0xF` and `0x1`. They assemble a single five-byte output with mask `0x1F`. The empty final mask at 90 ns causes the report at 95 ns to carry status `0x1` (`BAD_KEEP`). That packet has no output; valid nine-byte and one-byte packets follow. The lesson checks packet order, exact bytes, and all four reports.
+
+Run `make waveform` in this directory to regenerate the SVG. The raw VCD stays in the ignored build directory.

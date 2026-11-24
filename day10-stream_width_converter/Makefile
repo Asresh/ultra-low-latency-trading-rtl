@@ -65,3 +65,22 @@ formal: | $(BUILD)
 
 clean:
 	rm -rf $(BUILD)
+
+.PHONY: waveform
+
+waveform: $(BUILD)/up ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B width_demo.py $< $(BUILD)/waveform --vvp "$(VVP)" --waveform $(BUILD)/stream_width_converter.vcd
+	mkdir -p docs
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/stream_width_converter.vcd docs/waveform.svg \
+		--start 20 --end 180 --title 'Day 10 · Coalesce valid bytes and reject a bad mask' \
+		--signal 'tb_packet_gearbox.clk=Clock' \
+		--signal 'tb_packet_gearbox.s_valid=Input valid' \
+		--signal 'tb_packet_gearbox.s_ready=Input ready' \
+		--signal 'tb_packet_gearbox.s_keep=Input byte mask' \
+		--signal 'tb_packet_gearbox.s_last=Input last' \
+		--signal 'tb_packet_gearbox.m_valid=Output valid' \
+		--signal 'tb_packet_gearbox.m_ready=Output ready' \
+		--signal 'tb_packet_gearbox.m_keep=Output byte mask' \
+		--signal 'tb_packet_gearbox.m_last=Output last' \
+		--signal 'tb_packet_gearbox.report_valid=Report valid' \
+		--signal 'tb_packet_gearbox.report_status=Report status'

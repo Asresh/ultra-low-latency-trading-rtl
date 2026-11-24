@@ -318,4 +318,13 @@ module tb_redundant_market_data;
         $fclose(wire_file[1]);
         $finish;
     end
+
+    // Optional trace of the testbench ports for the checked README example.
+    string waveform_path;
+    initial begin
+        if ($value$plusargs("waveform=%s", waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1, tb_redundant_market_data);
+        end
+    end
 endmodule

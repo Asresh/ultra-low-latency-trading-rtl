@@ -29,6 +29,12 @@ The timer counts virtual active edges, excluding pause and stop-pending edges. P
 
 A repeated pass is anchored at `last transfer tick + repeat gap + 1`. Add the programmed offset of each event to that anchor to get its due tick. Equal offsets are processed in insertion order. The 48-bit virtual time and 32-bit statistics saturate at their maximum values.
 
+## Simulation waveform
+
+![A replayer beat stays valid with tag 0xA through a pause and stop until the sink accepts it](waveform.svg)
+
+The checked depth-16 simulation captures a beat with tag `0xA` held while the sink is blocked. The pause at 625 ns stops virtual time at tick `0x2`. Resume and stop follow. The sink raises ready at 930 ns, and the rising edge at 935 ns transfers the beat, clears valid, and pulses done. Run `make waveform` to regenerate the image and audit the entire capture against the Python model.
+
 ## Connections
 
 | Interface | Contract |

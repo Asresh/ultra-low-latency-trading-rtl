@@ -126,3 +126,11 @@ The `tune` subcommand takes a single-key `tick,cost` trace and evaluates explici
 The unblocked default burst delivered 266 decisions in consecutive cycles after warm-up. Every decision in that run transferred one cycle after acceptance. Latency and throughput measurements come from RTL simulation. The resource report comes from generic synthesis. Increasing key count adds a table read mux and update decoding, while wider ticks and refill rates enlarge the refill arithmetic.
 
 The source inventory counts 357 substantive RTL lines and 4,671 verification and tooling lines for a total of 5,028. It excludes comments and generated build outputs.
+
+## Checked simulation waveform
+
+![Rate gate · Independent audit and payload handshakes](waveform.svg)
+
+For tag `0x01`, the audit sink finishes first while the payload is still stalled. For tag `0x02`, the payload sink finishes first and the audit record remains valid until its own sink is ready. Tag `0x03` produces a limited audit (`0x2`) with no forward transfer. The scoreboard checks that each ready branch sees its copy exactly once.
+
+Run `make waveform` in this directory to rerun the checked bench and regenerate this cropped SVG. The full VCD is saved under `build/`.

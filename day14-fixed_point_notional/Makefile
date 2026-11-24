@@ -10,7 +10,7 @@ RTL := $(shell cat rtl.f)
 HEADERS := notional_codes.svh
 PROFILES := 0 8 31
 
-.PHONY: all test lint synth formal demo clean
+.PHONY: all test lint synth formal demo waveform clean
 all: test
 
 $(BUILD):
@@ -44,8 +44,19 @@ demo: $(BUILD)/q8.vvp
 	$(PYTHON) -B notional_wire.py pack fixtures/first_orders.csv $(BUILD)/lesson.nom1
 	$(PYTHON) -B notional_wire.py tape $(BUILD)/lesson.nom1 $(BUILD)/lesson.txt
 	cmp $(BUILD)/lesson-from-csv.txt $(BUILD)/lesson.txt
-	$(VVP) $(BUILD)/q8.vvp +small +source=$(BUILD)/lesson.txt +trace=$(BUILD)/lesson.trace
+	$(VVP) $(BUILD)/q8.vvp +small +source=$(BUILD)/lesson.txt +trace=$(BUILD)/lesson.trace $(DEMO_WAVEFORM)
 	$(PYTHON) -B notional_reconcile.py $(BUILD)/lesson.nom1 $(BUILD)/lesson.trace --output $(BUILD)/lesson-audit.json
+
+WAVE_SCOPE := tb_fixed_point_notional
+waveform: DEMO_WAVEFORM := +waveform=$(BUILD)/notional-demo.vcd
+waveform: demo
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/notional-demo.vcd waveform.svg \
+		--start 2130 --end 2250 --title "Rounded notional response waits for the consumer" \
+		--signal '$(WAVE_SCOPE).clk=Clock' --signal '$(WAVE_SCOPE).req_ready=Request ready' \
+		--signal '$(WAVE_SCOPE).req_valid=Request valid' --signal '$(WAVE_SCOPE).rsp_valid=Response valid' \
+		--signal '$(WAVE_SCOPE).rsp_ready=Response ready' --signal '$(WAVE_SCOPE).rsp_tag=Response tag' \
+		--signal '$(WAVE_SCOPE).rsp_gross=Gross' --signal '$(WAVE_SCOPE).rsp_fee=Fee' \
+		--signal '$(WAVE_SCOPE).rsp_cash=Cash debit'
 
 lint:
 	$(VERILATOR) --lint-only -Wall -I. --top-module $(TOP) -f rtl.f

@@ -134,3 +134,11 @@ python3 quote_archive_tool.py unpack build/custom/trace.bq build/custom/decoded.
 ```
 
 The CSV takes integer nanosecond timestamps, instrument and venue names, and integer tick prices. The importer subtracts the first timestamp and rounds later dates up to the next whole edge. If the first row has data, it prepends a reset and shifts data by one cycle. A JSON-lines replay can supply several same-edge offers. Each channel sequences its offers in file order, and the side and price are sampled on the actual accepting edge. The result report includes active and stale counts, winning venues, crossing observations, and latency percentiles. A recorded market-state run represents the observations in the capture, including any unsampled gap between its endpoints.
+
+## Checked RTL waveform
+
+![Timing waveform from the self-checking RTL simulation](docs/waveform.svg)
+
+The first result carries tag 11 (`0xB`) and sees the pre-update 100/106 quote. The next result sees 102/105. At 26 ns the best bid changes to 107 while the best ask remains 105, so the state becomes crossed (`0x5`) and the signed spread is −2. The renderer shows the raw 21-bit two's-complement pattern as `0x1FFFFE`. The fixture checks these results and the later stale and empty states.
+
+Run `make waveform` in this directory to regenerate the SVG. The raw VCD stays in the ignored build directory.

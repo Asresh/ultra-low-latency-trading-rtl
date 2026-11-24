@@ -12,7 +12,7 @@ TOP := ouch_order_session
 RTL := $(shell cat rtl.f)
 VFLAGS := -g2012 -Wall -Wno-sensitivity-entire-array
 
-.PHONY: all test test-host test-session test-framing test-decimal lint synth timing clean
+.PHONY: waveform wave-vcd all test test-host test-session test-framing test-decimal lint synth timing clean
 all: test
 
 test: test-host test-session test-framing test-decimal
@@ -66,6 +66,21 @@ timing: | build
 	$(NEXTPNR) --85k --package CABGA381 --speed 8 --threads 1 --out-of-context \
 		--freq $(ROUTE_FREQ) --seed $(ROUTE_SEED) --timing-allow-fail \
 		--json build/session-ecp5.json --report build/session-route.json --log build/nextpnr.log --quiet
+
+wave-vcd: build/session.vvp
+	$(PYTHON) -B gen_ouch_vectors.py --output build/wave --slots 8 --operations $(OPERATIONS) --seed $(SEED)
+	$(VVP) $< +vectors=build/wave +waves=build/wave/session.vcd
+	$(PYTHON) -B ouch_audit.py check-tx build/wave/hardware_tx.hex build/wave/tx.txt
+
+waveform: wave-vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/wave/session.vcd waveform.svg \
+		--start 13280 --end 15000 --title 'OUCH replay catches up before the live cursor advances' \
+		--signal 'tb_ouch_order_session.replaying=Replay Active' \
+		--signal 'tb_ouch_order_session.next_sequence=Next Live Sequence' \
+		--signal 'tb_ouch_order_session.m_notice_valid=Notice Valid' \
+		--signal 'tb_ouch_order_session.m_tx_valid=Client TX Valid' \
+		--signal 'tb_ouch_order_session.m_tx_last=Client TX Last' \
+		--signal 'tb_ouch_order_session.s_rx_valid=Server RX Valid'
 
 clean:
 	rm -rf build

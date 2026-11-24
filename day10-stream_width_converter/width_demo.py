@@ -15,7 +15,7 @@ EXAMPLE = Path(__file__).resolve().parent / "fixtures" / "first_packets.json"
 EXPECTED = ((65, "1122334455"), (65, "aabbccddeeff001122"), (67, "be"))
 
 
-def lesson(source, binary, directory, vvp):
+def lesson(source, binary, directory, vvp, waveform=None):
     """Verify and explain the exact known packets emitted by the article fixture."""
     value = json.loads(source.read_text(encoding="utf-8"))
     recipe = Recipe.parse(value)
@@ -27,7 +27,8 @@ def lesson(source, binary, directory, vvp):
     archive = directory / "lesson.wgc"
     edges = compile_recipe(source, tape)
     run_tool([vvp, str(binary.resolve()), "+small", f"+tape={tape.resolve()}",
-              f"+trace={trace.resolve()}"], directory / "simulate.log")
+              f"+trace={trace.resolve()}", *([f"+waveform={waveform.resolve()}"] if waveform else [])],
+             directory / "simulate.log")
     observed = verify(trace, 4, 8, 128)
     if observed["reports"] != {"OK": 3, "BAD_KEEP": 1}:
         raise ValueError("introductory workload must contain one malformed packet")
@@ -64,8 +65,9 @@ def main():
     parser.add_argument("binary", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--vvp", default="vvp")
+    parser.add_argument("--waveform", type=Path, help="optional VCD for the checked lesson")
     args = parser.parse_args()
-    result = lesson(EXAMPLE, args.binary, args.output, args.vvp)
+    result = lesson(EXAMPLE, args.binary, args.output, args.vvp, args.waveform)
     print("PASS introductory recipe through RTL")
     print(json.dumps(result, indent=2, sort_keys=True))
 

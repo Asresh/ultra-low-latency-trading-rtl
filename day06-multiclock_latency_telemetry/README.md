@@ -160,3 +160,11 @@ Structural synthesis completed with 74,941 generic cells on the default geometry
 - Optiver describes precision timestamping and hardware execution work in its [technology roles](https://prod-www.optiver.com/join-us/students/internships/technology/).
 - Jane Street lists low latency hardware, test tooling, and FPGA/ASIC design experience. [Hardware engineer](https://www.janestreet.com/join-jane-street/position/8651405002/)
 - The Gray pointer CDC pattern uses independent pointer state and two-stage synchronization. [Cummings, asynchronous FIFO design](https://www.cliffcummings.com/papers/CummingsSNUG2002SJ_FIFO1.pdf)
+
+## From the RTL simulation
+
+![Cross-clock tag pairing and duplicate start](waveform.svg)
+
+The two probe 0 observations carry tag 55 (0x37). The first reports status 0 (start stored) and the second reports status 2 (duplicate start). Probe 1 then supplies the end marker and produces status 1 at 1705 ns. The checker also compares the start and stop probe IDs and the encoded latency. The valid and end masks identify the originating asynchronous lanes.
+
+Run `make waveform` to rerun the checked scenario and regenerate the figure. The full capture is available at `build/wave/telemetry.vcd`.

@@ -65,3 +65,20 @@ report:
 
 clean:
 	rm -rf $(BUILD)
+
+.PHONY: waveform
+
+waveform: ../scripts/render_vcd_waveform.py
+	$(MAKE) PROFILE=default $(BUILD)/default/engine.vvp
+	$(PYTHON) -B verify_matching.py run --profile default --seed 7201 --commands 0 --vvp "$(VVP)" --sim $(BUILD)/default/engine.vvp --build $(BUILD)/waveform --waveform $(BUILD)/banked_matching_engine.vcd
+	mkdir -p docs
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/banked_matching_engine.vcd docs/waveform.svg \
+		--start 655 --end 800 --title 'Day 02 · A fill sequence shares the egress lane' \
+		--signal 'tb_banked_matching_engine.clk=Clock' \
+		--signal 'tb_banked_matching_engine.commits=Bank commit mask' \
+		--signal 'tb_banked_matching_engine.m_valid=Event valid' \
+		--signal 'tb_banked_matching_engine.m_ready=Event ready' \
+		--signal 'tb_banked_matching_engine.m_instrument=Event instrument' \
+		--signal 'tb_banked_matching_engine.m_tag=Command tag' \
+		--signal 'tb_banked_matching_engine.m_kind=Event kind' \
+		--signal 'tb_banked_matching_engine.m_last=Terminal event'

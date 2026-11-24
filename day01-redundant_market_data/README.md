@@ -168,3 +168,11 @@ Schedule rows are `cycle lane data_hex keep_hex first last`. A transactor may us
 The implementation exercises network datapaths, buffering, timing analysis and transaction-level verification relevant to trading hardware work. [Optiver FPGA Engineer](https://www.optiver.com/join-us/jobs/technology/chicago/fpga-engineer/), [Jane Street ASIC Engineer](https://www.janestreet.com/join-jane-street/position/8233259002/)
 
 The [common characterization report](../docs/performance.md) records the comparable default-geometry route, verification scope, and source inventory for all three designs.
+
+## Checked RTL waveform
+
+![Timing waveform from the self-checking RTL simulation](docs/waveform.svg)
+
+Two links offer the same datagram, so the feed-valid and final-beat masks both show `0x3`. The last beats transfer at 115 ns. The logic advances the next sequence from `0x32` to `0x33` and transfers one decoded event at 265 ns, 15 cycles after both final beats. The simulator checks the decoded event data as well as the absence of a duplicate.
+
+Run `make waveform` in this directory to regenerate the SVG. The raw VCD stays in the ignored build directory.

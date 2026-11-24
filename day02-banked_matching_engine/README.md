@@ -176,3 +176,11 @@ The [formal](formal/) harnesses exercise FIFO ordering and arbiter safety and fa
 The indexed limit model has no participant identity, self-trade prevention, peg logic, external exchange session, or persistent recovery. Price, ID and depth capacity are compile-time choices. Matching state is held in a single clock domain. Larger deployments would need a wider instrument map and a plan for RAM banking, software recovery, and timing closure.
 
 The [common characterization report](../docs/performance.md) records the comparable default-geometry route, verification scope, and source inventory for all three designs.
+
+## Checked RTL waveform
+
+![Timing waveform from the self-checking RTL simulation](docs/waveform.svg)
+
+Event kind `0x0` is a fill. The fill records around 715–755 ns carry low `m_last`, and the following event raises it to mark command completion. Other instruments can publish between records because the output arbiter serves per-instrument queues. The Python scoreboard checks the local order of events, including fills, while allowing legal interleaving between instruments.
+
+Run `make waveform` in this directory to regenerate the SVG. The raw VCD stays in the ignored build directory.

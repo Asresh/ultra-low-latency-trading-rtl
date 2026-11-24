@@ -209,3 +209,11 @@ make formal
 `make replay-demo` demonstrates the host tools on an offline synthetic feed. [market_replay.py](market_replay.py) validates a normalized CSV and emits a cycle journal and inventory. [market_trace_tools.py](market_trace_tools.py) audits ordered acknowledgements, stalls, revision continuity, epoch and current gates, and exports time windows. [market_cosim.py](market_cosim.py) compiles every journal cycle into exact RTL input vectors and compares all observable output pins. [market_checkpoint.py](market_checkpoint.py) generates and validates a deterministic restore tape from the recorded order inventory and explicitly supplied per-instrument sequence anchors. Its digest checks tape and manifest integrity for offline replay. The checked-in flow exercises sequence wrap during restoration.
 
 Build products, JSONL, CSV, traces, solver witnesses, and synthesis reports are under `build/`. The core's synthetic protocol assumes a coherent normalized ID/price mapping and trusts the source of a snapshot rebase. Network framing, exchange certification, risk limits, connectivity, authentication and persistent state are integration concerns.
+
+## Checked simulation waveform
+
+![Quote intents · Stale transfer and revision on reacquisition](waveform.svg)
+
+Instrument 0 first offers size four at 35 ns while the sink is stalled. A book change deasserts `q_current` at 40 ns without changing the held offer. The sink consumes that stale transfer at 45 ns. Instrument 1 takes the next offer, and instrument 0 returns at 65 ns with revision one. The test checks the same-cycle handshake, invalidation, and revision behavior.
+
+Run `make waveform` in this directory to rerun the checked bench and regenerate this cropped SVG. The full VCD is saved under `build/`.

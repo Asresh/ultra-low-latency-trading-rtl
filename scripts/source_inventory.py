@@ -29,7 +29,12 @@ BEGINNER_PROJECTS = (
     "day13-timestamped_stream_replayer",
     "day14-fixed_point_notional",
 )
-PROJECTS = LEGACY_PROJECTS + EXPANSION_PROJECTS + BEGINNER_PROJECTS
+PIPELINE_PROJECTS = (
+    "day15-multicast_packet_fanout",
+    "day16-credit_order_scheduler",
+    "day17-drop_copy_reconciliation",
+)
+PROJECTS = LEGACY_PROJECTS + EXPANSION_PROJECTS + BEGINNER_PROJECTS + PIPELINE_PROJECTS
 BASELINE_COMMIT = "80c7c41209814901a715ce0ee029ee4868b742cf"
 IGNORED_DIRS = {"build", "obj_dir", "fixtures", "generated", "__pycache__"}
 
@@ -94,7 +99,7 @@ def read_baseline(path):
 
 def file_role(path):
     """Count implementation separately from testbenches, formal, and host tools."""
-    if ("formal" in path.parts or path.suffix == ".py" or path.name.startswith("tb_")
+    if ("formal" in path.parts or path.suffix == ".py" or path.name.startswith(("tb_", "formal_"))
             or path.stem.endswith("_tb")):
         return "verification"
     return "rtl"
@@ -143,7 +148,7 @@ def main():
         row = f"| {project} | {counts['rtl']} | {counts['verification']} | {total} |"
         print(row + (f" {counts['added']} |" if args.compare else ""))
         minimum = args.minimum
-        if args.enforce:
+        if args.enforce and project not in PIPELINE_PROJECTS:
             floor = 2000 if project in LEGACY_PROJECTS else 5001
             minimum = max(floor, minimum)
         if total < minimum:

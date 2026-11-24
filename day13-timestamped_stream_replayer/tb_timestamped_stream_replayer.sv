@@ -30,7 +30,7 @@ module tb_timestamped_stream_replayer #(
     // A transcript records both held and accepted output pins before each rising edge.
     // These pins, including the clock and counters, are verified by the Python model.
     integer drive_file, trace_file, expected_rows;
-    string stimulus_path, transcript_path;
+    string stimulus_path, transcript_path, waveform_path;
     logic [200:0] last_offer_bits;
     logic [CW+3:0] last_result_bits;
     logic last_offer_stalled = 0, last_result_stalled = 0;
@@ -90,6 +90,10 @@ module tb_timestamped_stream_replayer #(
     endtask
 
     initial begin
+        if ($value$plusargs("waveform=%s",waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1,tb_timestamped_stream_replayer);
+        end
         if (!$value$plusargs("stim=%s",stimulus_path))
             $fatal(1,"missing +stim argument");
         if (!$value$plusargs("trace=%s",transcript_path))

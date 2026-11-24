@@ -163,3 +163,11 @@ The one-operation engine saves scoreboard and forwarding logic in exchange for l
 This design begins at the normalized event boundary. The caller owns symbol mapping, key authorization, slot allocation, replay recovery, and trusted execution sequence assignment. Halt allows the engine to drain reconciliation and blocks newly committed admissions. The sending adapter needs its own halt check if it must suppress authorizations already committed to the response queue. Reset invalidates all policies, orders, ledger, pending work, and replay history, so use it at a reconciled session boundary. Board-level timing, network transport, venue connectivity, and exchange-wide risk remain outside this RTL core.
 
 The [common characterization report](../docs/performance.md) records the comparable default-geometry route, verification scope, and source inventory for all three designs.
+
+## Checked simulation waveform
+
+![Risk gateway · Halt between admission and commit](waveform.svg)
+
+The boundary test admits requests `0x0a` and `0x0b` on the 405 ns and 445 ns rising edges. The first decision commits before halt and holds its `OK` reply (`0x0`) under backpressure. At 470 ns the bench asserts `halt_req` ahead of the second commit. The second reply is `HALTED` (`0x13`), and open orders stays at one. The reply handshakes occur at 495 ns and 515 ns.
+
+Run `make waveform` in this directory to rerun the checked bench and regenerate this cropped SVG. The full VCD is saved under `build/`.

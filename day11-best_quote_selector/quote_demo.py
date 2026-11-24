@@ -107,7 +107,7 @@ def _schedule_report(profile, normalized, replay):
     }
 
 
-def run(output, image, vvp):
+def run(output, image, vvp, waveform=None):
     """Create the source, run RTL, check the example, and build replay artifacts."""
     profile, aliases, normalized, events, replay = example_inputs()
     paths = (
@@ -116,7 +116,7 @@ def run(output, image, vvp):
         output / "capture.jsonl", output / "metrics.json", output / "report.md",
         output / "trace.bq", output / "trace-decoded.txt",
     )
-    reject_aliases([image], paths)
+    reject_aliases([image], (*paths, waveform) if waveform else paths)
     output.mkdir(exist_ok=True, parents=True)
     csv, catalog, event_file, driver, trace, plan, capture, metrics, markdown, _, _ = paths
     csv.write_text(EXAMPLE, encoding="ascii")
@@ -124,7 +124,7 @@ def run(output, image, vvp):
     write_events(event_file, events, profile)
     write_drives(driver, replay.drives, profile)
     save_report(plan, _schedule_report(profile, normalized, replay))
-    simulation(vvp, image, driver, trace)
+    simulation(vvp, image, driver, trace, waveform)
     result, captured = checked_capture(profile, driver, trace, "named-venue-example")
     known = _check_named_queries(captured)
     rebuilt = _archive_round_trip(profile, trace, output)
@@ -146,6 +146,7 @@ def arguments(argv=None):
     parser.add_argument("--output", type=Path, default=Path("build/example"))
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--vvp", default="vvp")
+    parser.add_argument("--waveform", type=Path, help="optional VCD for the checked example")
     return parser.parse_args(argv)
 
 
@@ -153,7 +154,7 @@ def main(argv=None):
     """Run the checked walkthrough and make trace failures visible to make."""
     args = arguments(argv)
     try:
-        run(args.output, args.image, args.vvp)
+        run(args.output, args.image, args.vvp, args.waveform)
     except (OSError, ValueError) as exc:
         print(f"quote_demo: {exc}", file=sys.stderr)
         return 2

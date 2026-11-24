@@ -140,6 +140,15 @@ module tb_eth_packet_arbiter;
         end
     endtask
 
+    // A requested capture records checked simulation signals for the README.
+    initial begin : optional_waveform
+        string wave_path;
+        if ($value$plusargs("wave=%s", wave_path)) begin
+            $dumpfile(wave_path);
+            $dumpvars(2, tb_eth_packet_arbiter);
+        end
+    end
+
     initial begin
         transfers = 0;
         run_phase(1,1,1);

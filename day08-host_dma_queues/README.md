@@ -123,3 +123,11 @@ make synth
 The regression writes `build/completions.hex` and `build/packets.txt` from the RTL. Run `python3 audit_directed_capture.py build` to compare those files again. For the host model, `python3 dma_workload.py --seed 8088 --requests 96 --depth 8 --output build/ledger.json` produces a separate expected workload. `dma_audit.py LEDGER COMPLETIONS PACKETS` accepts one 32-byte completion per hex row and one `queue tag cookie data keep first last` record per accepted stream beat. Completion order is compared per queue by default. An optional strict mode also compares the global schedule.
 
 The packet staging buffer provides a clear validation boundary and costs a whole-packet delay. The single worker and response-ordered writeback cap concurrency. Generic synthesis establishes connectivity and logical area. A production host path would also require a target memory or PCIe adapter, interrupt delivery, a driver, board clock constraints and measured end-to-end latency.
+
+## From the RTL simulation
+
+![Completion publication waits for the AXI write response](waveform.svg)
+
+The final completion entry write beat transfers on the 9055 ns rising edge. The test memory withholds the write response, keeping queue 0 completion tail at 3. The B response transfers at 9165 ns and the DMA publishes tail 4 at 9175 ns. The bench checks the submission head and completion counters throughout the stall.
+
+Run `make waveform` to rerun the checked scenario and regenerate the figure. The full capture is available at `build/wave/dma.vcd`.

@@ -102,6 +102,15 @@ module tb_packet_gearbox #(
         $finish;
     end
     initial begin repeat (160000) @(posedge clk); $fatal(1,"Gearbox watchdog"); end
+
+    // Optional trace of the testbench ports for the checked README example.
+    string waveform_path;
+    initial begin
+        if ($value$plusargs("waveform=%s", waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1, tb_packet_gearbox);
+        end
+    end
 endmodule
 
 `default_nettype wire

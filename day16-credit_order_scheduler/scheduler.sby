@@ -1,0 +1,23 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode prove
+cover: mode cover
+cover: depth 14
+
+[engines]
+safety: abc pdr
+cover: smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top credit_order_scheduler -D FORMAL_SCHEDULER -G CLASSES=2 -G DEPTH=2 -G CREDIT_W=3 -G TAG_W=4 -G PAYLOAD_W=4 credit_order_scheduler.sv
+prep -top credit_order_scheduler
+memory_map
+opt
+check -assert
+
+[files]
+credit_order_scheduler.sv

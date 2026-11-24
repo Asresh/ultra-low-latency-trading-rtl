@@ -26,7 +26,7 @@ module tb_fixed_point_notional #(parameter integer PRICE_FRAC = 8);
     integer exact = 0, rounded = 0, errors = 0;
     integer begin_cycle, first_reply;
     logic [31:0] noise = 32'hdf41ef53;
-    string source_name, target_name;
+    string source_name, target_name, waveform_path;
 
     always @(posedge clk) cycle <= cycle + 1;
     always @(negedge clk) noise = {noise[30:0],noise[31] ^ noise[24] ^ noise[8] ^ noise[0]};
@@ -107,6 +107,10 @@ module tb_fixed_point_notional #(parameter integer PRICE_FRAC = 8);
     endtask
 
     initial begin
+        if ($value$plusargs("waveform=%s",waveform_path)) begin
+            $dumpfile(waveform_path);
+            $dumpvars(1,tb_fixed_point_notional);
+        end
         if (!$value$plusargs("source=%s",source_name) || !$value$plusargs("trace=%s",target_name))
             $fatal(1,"Specify +source= and +trace=");
         reads = $fopen(source_name,"r");

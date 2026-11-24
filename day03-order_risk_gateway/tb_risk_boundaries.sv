@@ -321,6 +321,15 @@ module tb_risk_boundaries;
         end
     endtask
 
+    // A requested capture records checked simulation signals for the README.
+    initial begin : optional_waveform
+        string wave_path;
+        if ($value$plusargs("wave=%s", wave_path)) begin
+            $dumpfile(wave_path);
+            $dumpvars(2, tb_risk_boundaries);
+        end
+    end
+
     initial begin
         rst = 1;
         halt_req = 0;

@@ -9,7 +9,7 @@ RTL := $(shell cat rtl.f)
 TB := tb_latency_axil tb_latency_trace tb_latency_timebase tb_latency_probe_burst tb_latency_capacity tb_histogram_swap
 COMPONENTS := $(addprefix $(BUILD)/,$(addsuffix .vvp,$(TB)))
 
-.PHONY: all test regress icarus lint synth clean
+.PHONY: waveform wave-vcd all test regress icarus lint synth clean
 all: test
 icarus: test
 regress: test
@@ -58,6 +58,23 @@ lint:
 synth: | $(BUILD)
 	$(YOSYS) -Q -q -l $(BUILD)/synth.log -m slang -p 'read_slang --top $(TOP) $(RTL); synth -top $(TOP) -noabc; check -assert; stat'
 	tail -n 22 $(BUILD)/synth.log
+
+wave-vcd: $(BUILD)/telemetry.vvp
+	mkdir -p $(BUILD)/wave
+	$(VVP) $< +out=$(BUILD)/wave +waves=$(BUILD)/wave/telemetry.vcd
+	$(PYTHON) -B verify_latency_capture.py $(BUILD)/wave
+
+waveform: wave-vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/wave/telemetry.vcd waveform.svg \
+		--start 1535 --end 1720 --title 'Cross-clock tag pairing and duplicate start' \
+		--signal 'tb_multiclock_latency_telemetry.ref_clk=Reference Clock' \
+		--signal 'tb_multiclock_latency_telemetry.probe_valid=Probe Valid Mask' \
+		--signal 'tb_multiclock_latency_telemetry.probe_end=Probe End Mask' \
+		--signal 'tb_multiclock_latency_telemetry.dut.report_tag=Report Tag' \
+		--signal 'tb_multiclock_latency_telemetry.dut.report_status=Report Status' \
+		--signal 'tb_multiclock_latency_telemetry.dut.report_latency=Latency (ns)' \
+		--signal 'tb_multiclock_latency_telemetry.event_valid=Report Valid' \
+		--signal 'tb_multiclock_latency_telemetry.report_count=Reports Accepted'
 
 clean:
 	rm -rf $(BUILD)

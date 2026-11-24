@@ -9,7 +9,7 @@ RTL := $(shell cat rtl.f)
 HEADERS := dma_protocol.svh
 MEMORY_MODEL := tb_dma_memory.sv
 
-.PHONY: all test regress icarus test-host test-components test-integration lint synth clean
+.PHONY: waveform wave-vcd all test regress icarus test-host test-components test-integration lint synth clean
 all: test
 regress icarus: test
 test: test-host test-components test-integration
@@ -44,6 +44,23 @@ lint:
 synth: | $(BUILD)
 	$(YOSYS) -Q -q -l $(BUILD)/synth.log -m slang -p 'read_slang -I. --top $(TOP) $(RTL); synth -top $(TOP) -noabc; check -assert; stat'
 	tail -n 22 $(BUILD)/synth.log
+
+wave-vcd: $(BUILD)/tb_host_dma_queues.vvp
+	mkdir -p $(BUILD)/wave
+	$(VVP) $< +capture=$(BUILD)/wave +waves=$(BUILD)/wave/dma.vcd
+	$(PYTHON) -B audit_directed_capture.py $(BUILD)/wave
+
+waveform: wave-vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/wave/dma.vcd waveform.svg \
+		--start 8990 --end 9195 --title 'Completion publication waits for the AXI write response' \
+		--signal 'tb_host_dma_queues.clk=Clock' \
+		--signal 'tb_host_dma_queues.block_write_response=Memory Holds B' \
+		--signal 'tb_host_dma_queues.wvalid=AXI W Valid' \
+		--signal 'tb_host_dma_queues.wready=AXI W Ready' \
+		--signal 'tb_host_dma_queues.wlast=AXI W Last' \
+		--signal 'tb_host_dma_queues.bvalid=AXI B Valid' \
+		--signal 'tb_host_dma_queues.bready=AXI B Ready' \
+		--signal 'tb_host_dma_queues.inspect_cq_tail=Queue 0 CQ Tail'
 
 clean:
 	rm -rf $(BUILD)

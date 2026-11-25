@@ -11,6 +11,8 @@ module multisession_market_data #(
     parameter integer REQUEST_MAX = 8,
     parameter integer EPOCH_W = 16,
     parameter integer WAIT_W = 16,
+    parameter logic [16*SLOTS-1:0] MAX_REQUESTS_PER_HEAD = '0,
+    parameter logic [4*SLOTS-1:0] RETRY_BACKOFF_SHIFT = '0,
     localparam integer SLOT_W = SLOTS > 1 ? $clog2(SLOTS) : 1,
     localparam integer KEY_W = $clog2(SLOTS + 1)
 ) (
@@ -194,7 +196,9 @@ module multisession_market_data #(
 
         redundant_market_data #(
             .PACKET_BYTES(PACKET_BYTES), .MESSAGE_BYTES(MESSAGE_BYTES), .BLOCKS(BLOCKS),
-            .WINDOW(WINDOW), .GAP_TICKS(GAP_TICKS), .REQUEST_MAX(REQUEST_MAX)
+            .WINDOW(WINDOW), .GAP_TICKS(GAP_TICKS), .REQUEST_MAX(REQUEST_MAX),
+            .MAX_REQUESTS_PER_HEAD(int'(MAX_REQUESTS_PER_HEAD[16*slot+:16])),
+            .RETRY_BACKOFF_SHIFT(int'(RETRY_BACKOFF_SHIFT[4*slot+:4]))
         ) receiver (
             .clk, .rst, .cfg_valid(install[slot]), .cfg_ready(install_ready[slot]),
             .cfg_session(install_session), .cfg_sequence(install_sequence),

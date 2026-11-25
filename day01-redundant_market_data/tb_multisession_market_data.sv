@@ -3,7 +3,7 @@
 
 // Expected events are FIFO-ordered independently for each session. No fixed
 // cross-session order is imposed while the physical lanes run concurrently.
-module tb_multisession_market_data;
+module tb_multisession_market_data #(parameter bit BOUNDED = 0);
     localparam integer SLOTS = 3, EPOCH_W = 3, WAIT_W = 8;
     localparam integer SLOT_W = 2, KEY_W = 2, EXPECT_DEPTH = 4096;
     localparam logic [79:0] ALPHA = "ALPHA00001", BETA = "BETA000002",
@@ -47,7 +47,9 @@ module tb_multisession_market_data;
 
     multisession_market_data #(
         .SLOTS(SLOTS), .EPOCH_W(EPOCH_W), .WAIT_W(WAIT_W),
-        .PACKET_BYTES(128), .BLOCKS(8), .WINDOW(8), .GAP_TICKS(20)
+        .PACKET_BYTES(128), .BLOCKS(8), .WINDOW(8), .GAP_TICKS(20),
+        .MAX_REQUESTS_PER_HEAD(BOUNDED ? {16'd0,16'd3,16'd2} : 48'd0),
+        .RETRY_BACKOFF_SHIFT(BOUNDED ? {4'd0,4'd2,4'd1} : 12'd0)
     ) dut (.*);
 
     integer accepted_events = 0, accepted_requests = 0, accepted_acks = 0;
@@ -56,7 +58,7 @@ module tb_multisession_market_data;
     logic [EPOCH_W+587:0] wanted [0:SLOTS-1][0:EXPECT_DEPTH-1];
     logic [79:0] configured_session [0:SLOTS-1];
     logic [EPOCH_W-1:0] configured_epoch [0:SLOTS-1];
-    integer spacing [0:SLOTS-1], last_request [0:SLOTS-1];
+    integer spacing [0:SLOTS-1], last_request [0:SLOTS-1], requests_by_slot [0:SLOTS-1];
     integer cycle = 0;
     logic prior_event_hold = 0, prior_request_hold = 0, prior_ack_hold = 0;
     logic [SLOT_W+EPOCH_W+587:0] prior_event;
@@ -120,6 +122,7 @@ module tb_multisession_market_data;
                     $fatal(1, "request spacing violated");
                 last_request[request_slot] = cycle;
                 last_payload[request_slot] = request_data;
+                requests_by_slot[request_slot]++;
                 accepted_requests++;
             end
             if (ack_valid && ack_ready)
@@ -415,6 +418,67 @@ module tb_multisession_market_data;
         end
     endtask
 
+    task automatic recovery_with_slot_budgets;
+        integer a_before, b_before;
+        begin
+            a_before = requests_by_slot[0];
+            b_before = requests_by_slot[1];
+            request_ready = 0;
+            expect_delete(0,2,901,64'ha901);
+            expect_delete(0,2,902,64'ha902);
+            expect_delete(0,2,903,64'ha903);
+            expect_delete(1,2,0,64'hb000);
+            expect_delete(1,2,1,64'hb001);
+            expect_delete(1,2,2,64'hb002);
+            fork
+                send_delete(0,0,RENAMED,903,64'ha903,0,6);
+                send_delete(1,1,BETA,2,64'hb002,0,6);
+            join
+            while (!request_valid) @(negedge clk);
+            repeat (48) @(negedge clk);
+            if (requests_by_slot[0] != a_before || requests_by_slot[1] != b_before)
+                $fatal(1,"stalled shared request channel accepted a request");
+            request_ready = 1;
+            repeat (450) @(negedge clk);
+            if (requests_by_slot[0] != a_before+2 || requests_by_slot[1] != b_before+3 ||
+                last_payload[0] !== {RENAMED,64'd901,16'd2} ||
+                last_payload[1] !== {BETA,64'd0,16'd2})
+                $fatal(1,"initial independent head budgets failed");
+            monitor_slot = 0;
+            #1;
+            if (!monitor_gap || monitor_expected != 901)
+                $fatal(1,"slot 0 exhausted head disappeared from telemetry");
+            monitor_slot = 1;
+            #1;
+            if (!monitor_gap || monitor_expected != 0)
+                $fatal(1,"slot 1 exhausted head disappeared from telemetry");
+            send_delete(0,0,RENAMED,901,64'ha901,0,6);
+            repeat (450) @(negedge clk);
+            if (requests_by_slot[0] != a_before+4 || requests_by_slot[1] != b_before+3 ||
+                last_payload[0] !== {RENAMED,64'd902,16'd1})
+                $fatal(1,"partial repair did not renew only the new slot 0 head's budget");
+            fork
+                send_delete(0,0,RENAMED,902,64'ha902,0,6);
+                begin
+                    send_delete(1,1,BETA,0,64'hb000,0,6);
+                    send_delete(1,1,BETA,1,64'hb001,0,6);
+                end
+            join
+            wait_all_expected();
+            repeat (120) @(negedge clk);
+            if (requests_by_slot[0] != a_before+4 || requests_by_slot[1] > b_before+4)
+                $fatal(1,"requests kept running after passive repair");
+            monitor_slot = 0;
+            #1;
+            if (monitor_gap || monitor_expected != 904)
+                $fatal(1,"slot 0 failed to resume normal delivery");
+            monitor_slot = 1;
+            #1;
+            if (monitor_gap || monitor_expected != 3)
+                $fatal(1,"slot 1 failed to resume normal delivery");
+        end
+    endtask
+
     // The same file is read sequentially before launching the two lane drivers.
     // Each lane has independent pacing, while the next phase waits for all events.
     task automatic send_recorded(input integer lane, phase);
@@ -495,6 +559,7 @@ module tb_multisession_market_data;
             event_written[i] = 0;
             event_read[i] = 0;
             last_request[i] = -100000;
+            requests_by_slot[i] = 0;
         end
         repeat (4) @(negedge clk);
         rst = 0;
@@ -502,7 +567,10 @@ module tb_multisession_market_data;
         initial_config(1,BETA,BETA_START,32);
         initial_config(2,GAMMA,500,30);
         route_and_fence();
-        recovery_and_retry();
+        if (BOUNDED)
+            recovery_with_slot_budgets();
+        else
+            recovery_and_retry();
         replay_vectors();
 
         for (integer previous = 2; previous < 7; previous++) begin

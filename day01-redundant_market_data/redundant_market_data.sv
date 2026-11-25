@@ -6,7 +6,9 @@ module redundant_market_data #(
     parameter integer BLOCKS = 64,
     parameter integer WINDOW = 16,
     parameter integer GAP_TICKS = 64,
-    parameter integer REQUEST_MAX = 32
+    parameter integer REQUEST_MAX = 32,
+    parameter integer MAX_REQUESTS_PER_HEAD = 0,
+    parameter integer RETRY_BACKOFF_SHIFT = 0
 ) (
     input  logic         clk,
     input  logic         rst,
@@ -111,7 +113,8 @@ module redundant_market_data #(
 
     mold_reorder #(
         .MESSAGE_BYTES(MESSAGE_BYTES), .WINDOW(WINDOW), .GAP_TICKS(GAP_TICKS),
-        .REQUEST_MAX(REQUEST_MAX)
+        .REQUEST_MAX(REQUEST_MAX), .MAX_REQUESTS_PER_HEAD(MAX_REQUESTS_PER_HEAD),
+        .RETRY_BACKOFF_SHIFT(RETRY_BACKOFF_SHIFT)
     ) reorder (
         .clk, .clear, .session_active, .seed_sequence(cfg_sequence),
         .s_valid(candidate_valid), .s_ready(candidate_ready), .s_kind(candidate_kind),

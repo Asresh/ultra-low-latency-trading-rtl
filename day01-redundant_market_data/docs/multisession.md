@@ -131,6 +131,45 @@ and live counters saturate; a successful install resets the selected slot's
 counts. The two global discard counters persist until coordinated reset.
 An invalid monitor key returns zeroed state with `monitor_valid=0`.
 
+### Optional per-head retry limits
+
+The default keep-retrying behavior remains appropriate for offline replay.
+For bounded recovery traffic, pack one unsigned 16-bit
+`MAX_REQUESTS_PER_HEAD` and one unsigned 4-bit `RETRY_BACKOFF_SHIFT` per
+slot, with slot zero in the least significant field. A zero limit keeps
+retrying indefinitely. A zero shift preserves the original fixed native
+gap wait. For example, `MAX_REQUESTS_PER_HEAD={16'd0,16'd3,16'd2}` and
+`RETRY_BACKOFF_SHIFT={4'd0,4'd2,4'd1}` give slots one and zero different
+limits and capped waits, while slot two uses the original behavior.
+
+The first attempt waits `GAP_TICKS` active idle edges. After `n` admitted
+attempts for the same missing head, the native wait is
+`GAP_TICKS << min(n, RETRY_BACKOFF_SHIFT)`. An admission is the transfer
+into the shared request register. Its output can be delayed by the sink,
+and the existing per-slot cooldown starts on external transfer. The
+native wait and output cooldown can overlap. A previously offered
+request stays stable and drains once. If it is still pending after the
+head advanced, its transfer does not charge the new head's budget.
+
+Reaching the limit suppresses further requests for that missing head.
+`monitor_gap` and `monitor_expected` continue to show the unresolved gap.
+The A/B inputs and ordered event path keep running. If the missing
+message arrives later, its ordered release moves the head and starts
+a new budget. Installing a new epoch also clears the attempt count.
+With a bounded configuration, a persistent gap after the last request
+can therefore be escalated to a host-operated snapshot or epoch reset.
+An operator should confirm the epoch and expected head when comparing
+monitor readings to the transferred request log.
+
+![The retry wait doubles and caps, then a passive repair restores the next head's budget](retry-policy.svg)
+
+The native four-cycle policy offers requests at 75, 165, 335, and 505 ns.
+No further request is offered until a passive repair advances the head
+at 865 ns. The clock period in this test is 10 ns. The integration bench
+also verifies that one slot can renew its budget while an exhausted
+neighbor remains unchanged. Run `make test-retry-policy` or
+`make waveform-retry-policy` to reproduce these cases.
+
 ## Checked waveform
 
 ![The event for slot zero remains valid and stable until the sink accepts it; the next epoch acknowledgment then appears](multisession.svg)

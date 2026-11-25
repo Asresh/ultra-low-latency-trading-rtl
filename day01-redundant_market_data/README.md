@@ -140,6 +140,10 @@ For the measured path the final-to-event stages were three clocks for header and
 
 The optional recovery transport guard qualifies entire reply datagrams against a slot, epoch, live request and coverage map before they can rejoin the receiver. It includes a request dispatcher, independent audit output, and packet-level arbitration with live lane B. The closed-loop test captures real requests, retrieves the original wire bytes from the archive, injects faults, and checks repaired events. [Recovery guard integration and waveform](docs/recovery-guard.md)
 
+## Transactional snapshot cutover
+
+The optional snapshot coordinator validates order-book rows before staging them, fences the old slot, installs the new receiver epoch, and releases contiguous deltas after the book commit. A real receiver fixture restores a checksummed image and verifies the rebuilt order table across sequence wrap. [Protocol, host image format and checked waveform](docs/snapshot-cutover.md)
+
 ## Verification and replay
 
 [`scenarios.py`](scenarios.py) builds binary packets and injections. [`wire_codec.py`](wire_codec.py) independently parses and normalizes reference records. [`tb_redundant_market_data.sv`](tb_redundant_market_data.sv) consumes two independently paced streams, compares all 588 output bits, and checks requests, status, snapshots, flow control and cycle budgets.
@@ -170,7 +174,7 @@ Schedule rows are `cycle lane data_hex keep_hex first last`. A transactor may us
 
 - The default block accepts packets of up to 1,536 bytes, up to 64 blocks per packet and ITCH bodies up to 64 bytes. Default window depth is 16, timeout is 64 clocks, and cap is 32 messages. Keep packet sizes at least 64 bytes, message storage a multiple of eight bytes of at least 16, at least two descriptor entries, window a power of two from 2 through 32, and a positive timeout and request count when reconfiguring synthesis parameters.
 - Provide lane alignment, Ethernet/IP/UDP processing, clock crossing, integrity checks and packet-drop accounting outside this core. Both feed inputs can backpressure. A live MAC needs an ingress buffering and drop policy. An input that loses its last marker stays attached to its bank until a last marker or an epoch reset.
-- The design tracks one configured session at a time. It generates a standard recovery payload and accepts retransmitted downstream messages. Server discovery, rate limiting across sessions, packet transmission and book snapshot recovery belong to the integration.
+- The design tracks one configured session at a time. It generates a standard recovery payload and accepts retransmitted downstream messages. Server discovery and packet transmission belong to the integration. The optional multi-session and snapshot blocks provide slot-level request pacing and a staged book cutover interface.
 - Atomic validation adds a full receive pass and a block-length walk. The tradeoff is that malformed datagrams can be discarded before any event reaches the consumer.
 - A/B path selection and the recovery window have different timing objectives. The original design uses sequence-level windowing and separates the transport parser from the ITCH decoder. Compare this with Denholm et al.'s packet arbitration modes and their analysis of sequence comparison cost. [Low Latency FPGA Acceleration of Market Data Feed Arbitration, ASAP 2014](https://www.doc.ic.ac.uk/~wl/papers/14/asap14sd.pdf)
 

@@ -1,0 +1,22 @@
+[tasks]
+safety
+examples
+
+[options]
+safety: mode bmc
+safety: depth 11
+examples: mode cover
+examples: depth 20
+
+[engines]
+safety: abc bmc3
+examples: smtbmc boolector
+
+[script]
+read -formal -sv mold_snapshot_router.sv mold_snapshot_cutover.sv formal_snapshot_cutover.sv
+prep -top formal_snapshot_cutover
+
+[files]
+../mold_snapshot_router.sv
+../mold_snapshot_cutover.sv
+formal_snapshot_cutover.sv

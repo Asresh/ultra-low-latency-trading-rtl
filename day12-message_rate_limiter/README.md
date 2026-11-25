@@ -4,6 +4,8 @@ A token bucket is a budget that refills over time. Each message specifies how mu
 
 A key can represent a class of gateway traffic or an individual session. A configure command sets the maximum burst size and steady refill. Logical time is supplied by the caller, so a stalled bus does not silently advance a packet timestamp.
 
+The [hierarchical limiter](hierarchical_limiter.md) adds atomic port, group and session budgets with protected capacity for authenticated control sessions. Its [RTL waveform](hierarchy_waveform.svg) shows how a control session uses group headroom after an ordinary offer is limited.
+
 ## Work through one bucket
 
 Set capacity to four tokens and refill to one token per tick. Configuring the bucket starts it full.

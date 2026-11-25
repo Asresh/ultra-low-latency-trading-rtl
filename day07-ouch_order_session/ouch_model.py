@@ -7,6 +7,7 @@ state. Its outbound bytes come from Python struct formats.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import astuple, dataclass, replace
 from enum import IntEnum
 from typing import Iterable
@@ -495,13 +496,18 @@ def pack_login(login: Login) -> int:
 class Session:
     """Retain acknowledged sequence, market state, and pending commands across sockets."""
 
-    def __init__(self, slots: int = 8, tx_ticks: int = 4, rx_ticks: int = 7):
+    def __init__(
+        self, slots: int = 8, tx_ticks: int = 4, rx_ticks: int = 7, replay_depth: int = 0,
+    ):
         """Initialize the order ledger and independent link, timer and replay state."""
         if tx_ticks < 0 or rx_ticks < 0:
             raise ValueError("timer intervals must be nonnegative")
+        if replay_depth < 0:
+            raise ValueError("replay depth must be nonnegative")
         self.capacity = slots
         self.tx_ticks = tx_ticks
         self.rx_ticks = rx_ticks
+        self.replay_depth = replay_depth
         self.reset()
 
     def reset(self) -> None:
@@ -513,6 +519,8 @@ class Session:
         self.last_fault = Status.OK
         self.checkpoint = 1
         self.socket_cursor = 1
+        self.replay_history: OrderedDict[int, bytes] = OrderedDict()
+        self.unverified: int | None = None
         self.login_seen = False
         self.session = BLANK_SESSION
         self.market = False
@@ -522,6 +530,20 @@ class Session:
         self.logged_out = False
         self.tx_idle = 0
         self.rx_idle = 0
+
+    @property
+    def oldest_verifiable(self) -> int:
+        """Earliest retained sequence, or the next live position if empty."""
+        return next(iter(self.replay_history), self.checkpoint)
+
+    def _replay_bounds(self, sequence: int, ceiling: int) -> Status:
+        """Check the exact history and any verification obligation across cuts."""
+        if self.replay_depth:
+            if sequence < self.oldest_verifiable:
+                return Status.REPLAY_WINDOW
+            if sequence > ceiling or (self.unverified is not None and sequence > self.unverified):
+                return Status.REPLAY_FENCE
+        return Status.OK
 
     @property
     def replaying(self) -> bool:
@@ -569,6 +591,11 @@ class Session:
                 raise DecodeError(Status.LOGIN_TEXT, "invalid login replay window")
         except DecodeError:
             return Notice(NoticeKind.LOGIN_REJECT, Status.LOGIN_TEXT, seq=self.checkpoint), b""
+        bounds = self._replay_bounds(request.sequence, self.checkpoint)
+        if bounds != Status.OK:
+            return Notice(NoticeKind.LOGIN_REJECT, bounds, seq=request.sequence), b""
+        if self.replay_depth and request.sequence < self.checkpoint:
+            self.unverified = request.sequence
         self.request = request
         self.state = SessionState.LOGIN_WAIT
         return None, request.encode()
@@ -626,6 +653,11 @@ class Session:
             return self._fail(Notice(NoticeKind.FAULT, Status.LOGIN_TEXT, seq=self.checkpoint))
         if (self.login_seen and start > self.checkpoint) or (not self.login_seen and start != self.request.sequence):
             return self._fail(Notice(NoticeKind.FAULT, Status.SEQUENCE_GAP, seq=start))
+        bounds = self._replay_bounds(start, self.request.sequence)
+        if bounds != Status.OK:
+            return self._fail(Notice(NoticeKind.FAULT, bounds, seq=start))
+        if self.replay_depth:
+            self.unverified = start if start < self.checkpoint else None
         if not self.login_seen:
             self.checkpoint = start
         self.login_seen = True
@@ -635,7 +667,7 @@ class Session:
         self.last_fault = Status.OK
         return Notice(NoticeKind.LOGIN, seq=start)
 
-    def _ordered_event(self, event: VenueEvent) -> Notice:
+    def _ordered_event(self, event: VenueEvent, raw: bytes) -> Notice:
         """Suppress replayed events and require the next uncommitted sequence ID."""
         cursor = self.socket_cursor
         if cursor > self.checkpoint:
@@ -643,7 +675,11 @@ class Session:
         if cursor == MAX_SEQUENCE:
             return self._fail(Notice(NoticeKind.FAULT, Status.SEQUENCE_OVERFLOW, seq=cursor))
         if cursor < self.checkpoint:
+            if self.replay_depth and self.replay_history.get(cursor) != raw:
+                return self._fail(Notice(NoticeKind.FAULT, Status.REPLAY_DIVERGED, seq=cursor))
             self.socket_cursor += 1
+            if self.replay_depth:
+                self.unverified = self.socket_cursor if self.socket_cursor < self.checkpoint else None
             self.metrics.add("replayed")
             return Notice(NoticeKind.REPLAY, seq=cursor)
         if event.kind == "S":
@@ -659,6 +695,10 @@ class Session:
             notice = self.store.event(event, cursor)
         if notice.status != Status.OK:
             return self._fail(notice)
+        if self.replay_depth:
+            self.replay_history[cursor] = raw
+            if len(self.replay_history) > self.replay_depth:
+                self.replay_history.popitem(last=False)
         self.socket_cursor += 1
         self.checkpoint += 1
         self.metrics.add("decoded_events")
@@ -696,7 +736,7 @@ class Session:
             return Notice(NoticeKind.END, seq=self.checkpoint)
         if kind == "S":
             assert isinstance(payload, VenueEvent)
-            return self._ordered_event(payload)
+            return self._ordered_event(payload, envelope.frame())
         return self._fail(Notice(NoticeKind.FAULT, Status.LOGIN_PHASE, seq=self.checkpoint))
 
     def tick(self) -> tuple[Notice | None, bytes]:

@@ -3,5 +3,11 @@ ouch_soup_rx.sv
 ouch_soup_tx.sv
 ouch_decimal64.sv
 ouch_rx_decode.sv
+ouch_order_table_engine.sv
 ouch_order_table.sv
+ouch_replay_window.sv
+ouch_session_engine.sv
 ouch_order_session.sv
+ouch_checkpoint_validate.sv
+ouch_checkpoint_stream.sv
+ouch_recoverable_session.sv

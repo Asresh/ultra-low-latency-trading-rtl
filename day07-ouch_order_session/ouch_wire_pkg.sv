@@ -97,7 +97,10 @@ package ouch_wire_pkg;
         ST_DUP_MATCH = 25,
         ST_RX_TIMEOUT = 26,
         ST_LOGIN_REJECTED = 27,
-        ST_KILLED = 28
+        ST_KILLED = 28,
+        ST_REPLAY_WINDOW = 29,
+        ST_REPLAY_DIVERGED = 30,
+        ST_REPLAY_FENCE = 31
     } status_t;
 
     typedef struct packed {
@@ -156,6 +159,15 @@ package ouch_wire_pkg;
         command_t pending_command;
         logic match_seen;
     } order_state_t;
+
+    typedef struct packed {
+        logic ended;
+        logic killed;
+        logic market_open;
+        logic [31:0] highest_order_ref;
+        logic [63:0] next_sequence;
+        logic [79:0] session_id;
+    } checkpoint_meta_t;
 
     typedef struct packed {
         logic [31:0] socket_frames;

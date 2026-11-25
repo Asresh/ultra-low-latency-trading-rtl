@@ -1,0 +1,24 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode bmc
+safety: depth 18
+cover: mode cover
+cover: depth 18
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -D FORMAL_REPLAY -sv multicast_replay_buffer.sv
+chparam -set PORTS 2 -set RETAIN 2 -set MAX_BEATS 2 -set DATA_BYTES 1 -set SEQUENCE_W 3 -set EPOCH_W 2 -set TAG_W 2 multicast_replay_buffer
+prep -top multicast_replay_buffer
+memory_map
+opt
+
+[files]
+../multicast_replay_buffer.sv
+../fanout_status.svh
+replay_properties.svh

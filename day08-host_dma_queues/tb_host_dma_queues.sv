@@ -1,7 +1,8 @@
 `timescale 1ns/1ps
 
 module tb_host_dma_queues #(
-    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0,
+    parameter integer TEST_SEGMENTS = 8
 );
     localparam integer MAX_BURST = 8;
     localparam integer RING_LOG = 3;
@@ -64,7 +65,7 @@ module tb_host_dma_queues #(
     host_dma_queues #(
         .QUEUES(2), .RING_LOG(RING_LOG), .MAX_PACKET_BYTES(MAX_PACKET),
         .MAX_BURST(MAX_BURST), .CAPTURE_TIMEOUT(48),
-        .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION)
+        .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION), .MAX_SEGMENTS(TEST_SEGMENTS)
     ) dut (.*);
     tb_dma_memory #(.MAX_BURST(MAX_BURST), .SEED(32'hbcf1ab45)) memory (.*);
 
@@ -433,6 +434,7 @@ module tb_host_dma_queues #(
     end
 
 `include "tb_dma_readback.svh"
+`include "tb_dma_scatter.svh"
 
     task automatic run_isolated_access;
         logic [63:0] peer_payload;
@@ -476,6 +478,16 @@ module tb_host_dma_queues #(
         open_capture();
         integrity_run = $test$plusargs("readback") || $test$plusargs("isolation-access");
         reset_core();
+        if ($test$plusargs("segment-capacity")) begin
+            run_segment_capacity();
+            $finish;
+        end
+        if ($test$plusargs("scatter")) begin
+            run_scatter();
+            if (packet_capture) $fclose(packet_capture);
+            if (completion_capture) $fclose(completion_capture);
+            $finish;
+        end
         if ($test$plusargs("isolation-access")) begin
             run_isolated_access();
             $finish;

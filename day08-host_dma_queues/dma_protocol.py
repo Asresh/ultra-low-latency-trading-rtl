@@ -13,8 +13,10 @@ RECORD_BYTES = 32
 MAX_PAYLOAD = 512
 LANES = 8
 MAX_AXI_BEATS = 16
+MAX_SEGMENTS = 8
 AXI_PAGE = 4096
 RING_RECORD = struct.Struct("<QQQQ")
+SEGMENT_RECORD = struct.Struct("<QII")
 FLAG_IRQ = 1
 FLAG_CRC = 2
 FLAG_VERIFY = 4
@@ -26,6 +28,9 @@ class Opcode(IntEnum):
     PUSH = 2
     FENCE = 3
     READBACK = 4
+    GATHER = 5
+    SCATTER = 6
+    SEGMENT_DIGEST = 7
 
 
 class Status(IntEnum):
@@ -39,6 +44,7 @@ class Status(IntEnum):
     STREAM_FORMAT = 7
     CAPTURE_TIMEOUT = 8
     VERIFY_ERROR = 9
+    SEGMENT_ERROR = 10
 
 
 class AxiResponse(IntEnum):
@@ -222,6 +228,21 @@ class Descriptor:
         """Return the PUSH flag that compares AXI readback to the captured bytes."""
         return bool(self.flags & FLAG_VERIFY)
 
+    @property
+    def segmented(self):
+        """Return whether address and reserved fields name a segment table."""
+        return self.op in (Opcode.GATHER, Opcode.SCATTER, Opcode.SEGMENT_DIGEST)
+
+    @property
+    def pull(self):
+        """Return whether to send the assembled bytes to the device stream."""
+        return self.op in (Opcode.PULL, Opcode.GATHER)
+
+    @property
+    def push(self):
+        """Return whether to receive a frame into the DMA worker."""
+        return self.op in (Opcode.PUSH, Opcode.SCATTER)
+
     def words(self):
         """Return the protocol record as fixed-width little-endian bus words."""
         first = packed_fields((self.op,8),(self.flags,8),(self.tag,16),(self.length,32))
@@ -247,22 +268,75 @@ class Descriptor:
             raise ValueError("descriptor must contain exactly 32 bytes")
         return cls.from_words(RING_RECORD.unpack(data))
 
-    def validate(self, aperture):
+    def validate(self, aperture, max_segments=MAX_SEGMENTS):
         """Check the record for inconsistent fields before it can be encoded or consumed."""
-        if self.flags & ~VALID_FLAGS or self.reserved or (self.expected_crc and not self.check_crc):
+        if self.flags & ~VALID_FLAGS or (self.expected_crc and not self.check_crc):
             return Status.BAD_DESC
-        if self.verify_write and self.op != Opcode.PUSH:
+        if self.verify_write and not self.push:
+            return Status.BAD_DESC
+        if self.segmented:
+            if not 1 <= self.reserved <= max_segments:
+                return Status.BAD_DESC
+        elif self.reserved:
             return Status.BAD_DESC
         if self.op == Opcode.FENCE:
             if self.length or self.address or self.check_crc:
                 return Status.BAD_DESC
-        elif self.op not in (Opcode.PULL,Opcode.PUSH,Opcode.READBACK):
+        elif not (self.segmented or self.pull or self.push or self.op == Opcode.READBACK):
             return Status.BAD_OP
         elif not 1 <= self.length <= MAX_PAYLOAD or self.address%LANES:
             return Status.ADDRESS
-        elif not aperture.contains(self.address,rounded(self.length)):
+        elif not aperture.contains(
+            self.address, self.reserved*SEGMENT_RECORD.size if self.segmented else rounded(self.length),
+        ):
             return Status.ADDRESS
         return Status.OK
+
+
+@dataclass(frozen=True)
+class Segment:
+    """One little-endian 16-byte gather/scatter table entry."""
+
+    address: int
+    length: int
+    reserved: int = 0
+
+    def __post_init__(self):
+        bounded(self.address,64,"segment address")
+        bounded(self.length,32,"segment byte count")
+        bounded(self.reserved,32,"segment reserved word")
+
+    def encode(self):
+        return SEGMENT_RECORD.pack(self.address,self.length,self.reserved)
+
+
+def segment_plan(descriptor, aperture, table, max_segments=MAX_SEGMENTS):
+    """Decode ordered segments and reject a plan before any payload effects."""
+    if not descriptor.segmented or descriptor.validate(aperture,max_segments) != Status.OK:
+        raise ValueError("invalid segmented descriptor")
+    if len(table) != descriptor.reserved*SEGMENT_RECORD.size:
+        raise ValueError("segment table length differs from descriptor count")
+    protected = [Region(descriptor.address, descriptor.address+len(table))]
+    regions = []
+    total = 0
+    for index, fields in enumerate(SEGMENT_RECORD.iter_unpack(table)):
+        item = Segment(*fields)
+        footprint = rounded(item.length)
+        if item.reserved or not item.length or item.address%LANES or (
+            index+1 != descriptor.reserved and item.length%LANES
+        ):
+            raise ValueError(f"segment {index} has invalid fields or nonfinal alignment")
+        if not aperture.contains(item.address,footprint):
+            raise ValueError(f"segment {index} lies outside the payload aperture")
+        region = Region(item.address,item.address+footprint)
+        if any(region.overlaps(prior) for prior in protected):
+            raise ValueError(f"segment {index} overlaps a prior segment or its table")
+        protected.append(region)
+        regions.append(item)
+        total += item.length
+    if total != descriptor.length:
+        raise ValueError("segment lengths do not sum to packet size")
+    return tuple(regions)
 
 
 @dataclass(frozen=True)

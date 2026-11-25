@@ -6,6 +6,8 @@ The default core has two queues of eight entries, a 512-byte packet buffer, 64-b
 
 The [memory integrity path](#memory-readback-and-verified-capture) adds digest-only READBACK and optional PUSH readback verification for host-buffer captures. The [queue-isolation mode](#optional-queue-address-isolation) prevents overlapping memory claims across enabled queues.
 
+[Scatter/gather descriptors](scatter_gather.md) move or verify a logical packet across disjoint AXI address ranges. The [checked segmented waveform](scatter_waveform.svg) shows the payload writes retiring before readback and completion publication.
+
 ```mermaid
 flowchart LR
     Host["Host rings and doorbells"] --> Queues["Queue table<br/>credits, bounds and IRQ"]
@@ -71,14 +73,17 @@ Each row is one little-endian 64-bit word. Fields separated by vertical bars are
 | 2 | **PUSH.** Offer a tagged capture request, collect the associated frame, validate its shape and CRC, then write payload memory. Completion follows the last payload write response. |
 | 3 | **FENCE.** Publish an in-order completion for the queue after prior work has retired. Length, address, CRC flag and expected CRC must be zero. |
 | 4 | **READBACK.** Read an aligned byte range and return its CRC-32 in the completion. The packet and capture ports remain idle. The CRC flag enables an expected-digest comparison. |
+| 5 | **GATHER.** Preflight a segment table, read its buffers in table order and emit one frame. |
+| 6 | **SCATTER.** Preflight a segment table, accept one frame and write its chunks in table order. Supports end-to-end readback verification. |
+| 7 | **SEGMENT_DIGEST.** Read disjoint segments and publish their ordered CRC-32 without sending data to the packet stream. |
 
-Flag bit 0 requests an immediate interrupt after retirement. Flag bit 1 compares the payload against the expected IEEE CRC-32. Flag bit 2 enables write verification and is valid for PUSH only. CRC counts only valid bytes in wire order, starts with all ones and uses final complement. The 64-bit cookie is application-defined and is copied into the completion. Reserved flags and the reserved word must be zero. The expected CRC field must be zero when comparison is disabled.
+Flag bit 0 requests an immediate interrupt after retirement. Flag bit 1 compares the payload against the expected IEEE CRC-32. Flag bit 2 enables write verification for PUSH and SCATTER. CRC counts only valid bytes in wire order, starts with all ones and uses final complement. The 64-bit cookie is application-defined and is copied into the completion. The otherwise reserved word is the list count for segmented opcodes. Reserved flags and words must be zero. The expected CRC field must be zero when comparison is disabled.
 
 An address must be 8-byte aligned and the entire rounded memory footprint must fall inside the configured payload interval without carry. Packets can end in a partial beat. The bus uses a final write strobe to protect surrounding bytes and the packet output zeroes unselected lanes.
 
 | Status | Meaning and effect |
 | ---: | --- |
-| 0 | Success. The CQ reports the processed length for PULL, PUSH and READBACK and zero for FENCE. |
+| 0 | Success. The CQ reports the processed length for data and digest operations and zero for FENCE. |
 | 1 | Unsupported operation. |
 | 2 | Reserved bits, CRC request format or FENCE arguments invalid. |
 | 3 | Payload length or rounded address range invalid. |
@@ -88,6 +93,7 @@ An address must be 8-byte aligned and the entire rounded memory footprint must f
 | 7 | Capture frame has invalid first/last markers, lanes or length. The core drains through a final marker when present within the drain budget. |
 | 8 | Capture timed out after the offer was accepted. The capture adapter uses `capture_abort` to abandon that request. |
 | 9 | Verified PUSH received bytes whose digest differs from the captured frame. The completion carries the observed readback digest. Treat the destination as unverified. |
+| 10 | A segmented descriptor's list failed preflight. No packet or payload transaction began. |
 
 Errors report zero transferred bytes. CRC mismatch, payload write failure and verification mismatch retain a computed digest. Other errors report zero CRC. The timestamp is the free-running engine cycle when the worker decided the result, before it issues completion writeback. Unsigned subtraction handles bounded intervals across the 64-bit cycle wrap.
 
@@ -162,8 +168,9 @@ make synth
 | Queue and interrupt units | 1,073 retired entries across three queues, concurrent retirement and doorbell updates, modulo wrap, full CQ and invalid configuration. Interrupt tests cover batch, timer, saturation and coincident acknowledge/retire. |
 | CRC | 4,845 accepted beats, 19,348 selected bytes, every keep mask, the standard `123456789` check and a separate bit-oriented oracle. |
 | Memory integrity | An RTL run checks 29 completions, nine error responses, 677 verified PUSH bytes, every partial final lane count, and the 512-byte maximum. It covers a corrupted readback, held responses, failed payload and verification responses, and fail-stop after malformed verification RLAST. An independent Python audit checks all CQ payload fields and confirms zero stream packets. |
-| Host reference | 50 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all ten statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
-| Structural checks | Strict Verilator lint and zero Yosys structural findings in both modes. Default generic synthesis produced 32,057 cells with shared layouts allowed and 44,500 cells with address isolation enabled. |
+| Scatter/gather | Twenty binary-audited completions, including 16 deliberate errors, and two byte-exact gathered packets totaling 176 bytes. The hardware test verifies a 153-byte scatter and one-, three- and eight-slot list geometry. |
+| Host reference | 67 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all eleven statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
+| Structural checks | Strict Verilator lint and zero Yosys structural findings with the default configuration and with address isolation enabled. |
 
 The regression writes `build/completions.hex` and `build/packets.txt` from the RTL. Run `python3 audit_directed_capture.py build` to compare those files again. For the host model, `python3 dma_workload.py --seed 8088 --requests 96 --depth 8 --output build/ledger.json` produces a separate expected workload. `dma_audit.py LEDGER COMPLETIONS PACKETS` accepts one 32-byte completion per hex row and one `queue tag cookie data keep first last` record per accepted stream beat. Completion order is compared per queue by default. An optional strict mode also compares the global schedule.
 

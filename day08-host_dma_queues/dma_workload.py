@@ -10,7 +10,7 @@ import random
 from dma_model import AxiFault, Capture, Engine, Fabric, Phase, SparseMemory
 from dma_protocol import (
     AxiResponse, Beat, Burst, Descriptor, FLAG_CRC, FLAG_IRQ, FLAG_VERIFY, Opcode, QueueConfig, Region,
-    Ring, Status, U32_MASK, add_pointer, crc32, rounded,
+    Ring, Segment, Status, U32_MASK, add_pointer, crc32, rounded,
 )
 
 
@@ -25,6 +25,8 @@ class Work:
     memory_prepare: bytes = b""
     fault: AxiFault = None
     observed_crc: int = 0
+    segments: tuple = ()
+    extra_memory: tuple = ()
 
     def request_image(self):
         """Return the serialized submission and capture input for the replay bundle."""
@@ -33,6 +35,7 @@ class Work:
             "queue": self.lane,
             "raw_descriptor": d.encode().hex(),
             "memory_init": self.memory_prepare.hex(),
+            "extra_memory": [[address, bytes_value.hex()] for address,bytes_value in self.extra_memory],
             "capture": None if self.capture is None else {
                 "beats": [beat.as_tuple() for beat in self.capture.beats],
                 "timing": self.capture.delays,
@@ -50,6 +53,7 @@ CASES = (
     "out_of_range", "pull_crc", "push_crc", "stream_format", "timeout", "read_error",
     "write_error", "zero_length", "unaligned",
     "readback", "readback_crc", "verify", "verify_corrupt", "verify_read_error",
+    "gather", "scatter", "bad_segments",
 )
 
 
@@ -77,6 +81,25 @@ def make_item(rng,lane,ordinal,aperture,kind):
     if kind == "push":
         d = replace(d,op=Opcode.PUSH)
         return Work(lane,d,Status.OK,capture=Capture.body(data),push=data,observed_crc=digest)
+    if kind in ("gather", "scatter", "bad_segments"):
+        if len(data) < 9:
+            data += random_bytes(rng,9-len(data))
+        digest = crc32(data)
+        gather = kind == "gather"
+        flags = flag|(FLAG_VERIFY if not gather else 0)
+        d = replace(d,op=Opcode.GATHER if gather else Opcode.SCATTER,
+                    flags=flags,length=len(data),reserved=2,expected_crc=digest if flags&FLAG_CRC else 0)
+        segments = (Segment(address+0x408,8),Segment(address+0x708,len(data)-8))
+        if kind == "bad_segments":
+            segments = (segments[0],replace(segments[1],address=segments[0].address))
+        table = b"".join(segment.encode() for segment in segments)
+        if kind == "bad_segments":
+            return Work(lane,d,Status.SEGMENT_ERROR,memory_prepare=table)
+        if gather:
+            prep = [(segments[0].address,data[:8]),(segments[1].address,data[8:])]
+            return Work(lane,d,Status.OK,pull=data,memory_prepare=table,extra_memory=prep,observed_crc=digest)
+        return Work(lane,d,Status.OK,capture=Capture.body(data),push=data,
+                    memory_prepare=table,segments=segments,observed_crc=digest)
     if kind == "readback":
         d = replace(d,op=Opcode.READBACK)
         return Work(lane,d,Status.OK,memory_prepare=data,observed_crc=digest)
@@ -195,11 +218,14 @@ def assert_body_effect(memory,item,fill):
     """Check the expected payload changes and untouched memory sentinels."""
     d = item.descriptor
     if item.push:
-        rounded_len = rounded(d.length)
-        got = memory.read(d.address,rounded_len)
-        expected = item.push+bytes((fill,))*(rounded_len-len(item.push))
-        if got != expected:
-            raise AssertionError(f"write strobe payload discrepancy at {d.address:#x}")
+        offset = 0
+        for segment in item.segments or (Segment(d.address,d.length),):
+            rounded_len = rounded(segment.length)
+            got = memory.read(segment.address,rounded_len)
+            expected = item.push[offset:offset+segment.length]+bytes((fill,))*(rounded_len-segment.length)
+            if got != expected:
+                raise AssertionError(f"write strobe payload discrepancy at {segment.address:#x}")
+            offset += segment.length
     if d.op == Opcode.PUSH and item.status in (
         Status.CRC_ERROR,Status.WRITE_ERROR,Status.STREAM_FORMAT,Status.CAPTURE_TIMEOUT
     ):
@@ -283,6 +309,8 @@ def exercise(configs,entries,seed):
                 item = outstanding[index].popleft()
                 if item.memory_prepare:
                     memory.write(item.descriptor.address,item.memory_prepare)
+                for address,body in item.extra_memory:
+                    memory.write(address,body)
                 assert engine.host_post(index,item.descriptor,item.capture)
                 log("post",queue=index,cookie=item.descriptor.cookie,sq_tail=queue.sq_tail)
             if queue.completion_count and (rng.random()<0.11 or not outstanding[index]):

@@ -57,13 +57,14 @@ class DmaReadback(unittest.TestCase):
         self.assertEqual((model.pull_bytes, model.push_bytes), (0, 0))
         self.assertTrue(model.queues[0].irq.request)
 
-    def test_verify_flag_is_limited_to_push_and_crc_is_independent(self):
+    def test_verify_flag_is_limited_to_capture_operations_and_crc_is_independent(self):
         for op in Opcode:
             with self.subTest(op=op):
-                descriptor = replace(self.push, op=op)
+                count = op in (Opcode.GATHER, Opcode.SCATTER, Opcode.SEGMENT_DIGEST)
+                descriptor = replace(self.push, op=op, reserved=int(count))
                 self.assertEqual(
                     descriptor.validate(self.aperture),
-                    Status.OK if op == Opcode.PUSH else Status.BAD_DESC,
+                    Status.OK if op in (Opcode.PUSH, Opcode.SCATTER) else Status.BAD_DESC,
                 )
         raw = self.readback.encode()
         self.assertEqual(Descriptor.decode(raw), self.readback)

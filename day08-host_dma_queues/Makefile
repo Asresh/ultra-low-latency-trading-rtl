@@ -8,11 +8,12 @@ TOP := host_dma_queues
 RTL := $(shell cat rtl.f)
 HEADERS := dma_protocol.svh
 MEMORY_MODEL := tb_dma_memory.sv
+INTEGRATION_HEADERS := tb_dma_readback.svh tb_dma_scatter.svh
 
-.PHONY: waveform wave-vcd waveform-readback all test regress icarus test-host test-components test-integration test-readback test-isolation lint synth clean
+.PHONY: waveform wave-vcd waveform-readback waveform-scatter all test regress icarus test-host test-components test-integration test-readback test-isolation test-scatter lint synth clean
 all: test
 regress icarus: test
-test: test-host test-components test-integration test-readback test-isolation
+test: test-host test-components test-integration test-readback test-isolation test-scatter
 
 test-host: | $(BUILD)
 	$(PYTHON) -B -m unittest discover -v
@@ -38,6 +39,12 @@ test-isolation: $(BUILD)/tb_dma_queue_isolation.vvp $(BUILD)/tb_host_dma_isolati
 	$(VVP) $(BUILD)/tb_host_dma_isolation.vvp +readback +capture=$(BUILD)/isolation
 	$(PYTHON) -B audit_dma_readback.py $(BUILD)/isolation
 
+test-scatter: $(BUILD)/tb_host_dma_queues.vvp $(BUILD)/tb_host_dma_seg1.vvp $(BUILD)/tb_host_dma_seg3.vvp
+	mkdir -p $(BUILD)/scatter
+	$(VVP) $< +scatter +capture=$(BUILD)/scatter
+	$(PYTHON) -B audit_dma_scatter.py $(BUILD)/scatter
+	@set -e; for bench in $^; do $(VVP) "$$bench" +segment-capacity; done
+
 waveform-readback: $(BUILD)/tb_host_dma_queues.vvp ../scripts/render_vcd_waveform.py
 	mkdir -p $(BUILD)/readback-wave
 	$(VVP) $< +readback +capture=$(BUILD)/readback-wave +waves=$(BUILD)/readback-wave/readback.vcd
@@ -55,6 +62,21 @@ waveform-readback: $(BUILD)/tb_host_dma_queues.vvp ../scripts/render_vcd_wavefor
 		--signal 'tb_host_dma_queues.inspect_cq_tail=Queue 0 CQ tail' \
 		--signal 'tb_host_dma_queues.irq=IRQ'
 
+waveform-scatter: $(BUILD)/tb_host_dma_queues.vvp ../scripts/render_vcd_waveform.py
+	mkdir -p $(BUILD)/scatter-wave
+	$(VVP) $< +scatter +capture=$(BUILD)/scatter-wave +waves=$(BUILD)/scatter-wave/scatter.vcd
+	$(PYTHON) -B audit_dma_scatter.py $(BUILD)/scatter-wave
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/scatter-wave/scatter.vcd scatter_waveform.svg \
+		--start 2490 --end 3710 --title 'Verified scatter waits for every payload response before readback' \
+		--signal 'tb_host_dma_queues.dut.state=DMA worker state' \
+		--signal 'tb_host_dma_queues.dut.segment=Segment index' \
+		--signal 'tb_host_dma_queues.block_write_response=Memory holds B' \
+		--signal 'tb_host_dma_queues.awvalid=AXI AW valid' \
+		--signal 'tb_host_dma_queues.bvalid=AXI B valid' \
+		--signal 'tb_host_dma_queues.arvalid=AXI AR valid' \
+		--signal 'tb_host_dma_queues.inspect_cq_tail=Queue 1 CQ tail' \
+		--signal 'tb_host_dma_queues.irq=Interrupt levels'
+
 $(BUILD):
 	mkdir -p $@
 
@@ -64,13 +86,16 @@ $(BUILD)/tb_dma_axi64_max.vvp: tb_dma_axi64.sv $(RTL) $(HEADERS) rtl.f | $(BUILD
 $(BUILD)/tb_dma_queue_isolation.vvp: tb_dma_queue_table.sv $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_dma_queue_table -Ptb_dma_queue_table.ENFORCE_QUEUE_ISOLATION=1 -o $@ -f rtl.f $<
 
-$(BUILD)/tb_host_dma_isolation.vvp: tb_host_dma_queues.sv tb_dma_readback.svh $(MEMORY_MODEL) $(RTL) $(HEADERS) rtl.f | $(BUILD)
+$(BUILD)/tb_host_dma_isolation.vvp: tb_host_dma_queues.sv $(INTEGRATION_HEADERS) $(MEMORY_MODEL) $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_host_dma_queues -Ptb_host_dma_queues.ENFORCE_QUEUE_ISOLATION=1 -o $@ -f rtl.f $< $(MEMORY_MODEL)
+
+$(BUILD)/tb_host_dma_seg%.vvp: tb_host_dma_queues.sv $(INTEGRATION_HEADERS) $(MEMORY_MODEL) $(RTL) $(HEADERS) rtl.f | $(BUILD)
+	$(IVERILOG) -g2012 -I . -s tb_host_dma_queues -Ptb_host_dma_queues.TEST_SEGMENTS=$* -o $@ -f rtl.f $< $(MEMORY_MODEL)
 
 $(BUILD)/tb_host_dma_queues.vvp $(BUILD)/tb_dma_contention.vvp: $(BUILD)/tb_%.vvp: tb_%.sv $(MEMORY_MODEL) $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_$* -o $@ -f rtl.f $< $(MEMORY_MODEL)
 
-$(BUILD)/tb_host_dma_queues.vvp: tb_dma_readback.svh
+$(BUILD)/tb_host_dma_queues.vvp: $(INTEGRATION_HEADERS)
 
 $(BUILD)/tb_%.vvp: tb_%.sv $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_$* -o $@ -f rtl.f $<

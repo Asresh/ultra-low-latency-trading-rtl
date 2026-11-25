@@ -107,8 +107,8 @@ def write_bundle(destination, tape, depth, *, shift=True):
     return payload
 
 
-def read_bundle(directory):
-    """Verify canonical paths, each digest and geometry, then restore the full schedule."""
+def _validated_bundle(directory):
+    """Return the original partition layout and its validated combined tape."""
     directory = Path(directory)
     manifest = json.loads((directory/"manifest.json").read_text(encoding="utf-8"))
     schema = {"version", "depth", "rebase", "records", "total_beats", "total_bytes"}
@@ -140,7 +140,17 @@ def read_bundle(directory):
     combined = join_partitions(parts)
     if len(combined.events) != manifest["total_beats"] or combined.payload_bytes != manifest["total_bytes"]:
         raise ReplayError("partition totals differ from the manifest")
-    return combined
+    return tuple(parts), combined
+
+
+def read_bundle(directory):
+    """Verify a bundle and restore its complete original schedule."""
+    return _validated_bundle(directory)[1]
+
+
+def read_bundle_parts(directory):
+    """Verify a bundle and preserve its original partition boundaries."""
+    return _validated_bundle(directory)[0]
 
 
 def main():

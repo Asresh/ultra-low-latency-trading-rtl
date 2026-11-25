@@ -1,0 +1,30 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode bmc
+safety: depth 17
+cover: mode cover
+cover: depth 22
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -D FORMAL_BANKED_AUCTION -sv matching_fifo.sv matching_arbiter.sv call_auction_engine.sv banked_call_auction.sv
+chparam -set BANKS 2 -set PRICES 1 -set SLOTS 2 -set QTY_W 2 -set OWNER_W 1 -set EPOCH_W 2 -set TAG_W 2 -set SEQ_W 3 -set CLOCK_W 4 -set CMD_DEPTH 1 -set EVENT_DEPTH 1 banked_call_auction
+prep -top banked_call_auction
+flatten
+memory_map
+opt
+
+[files]
+../matching_fifo.sv
+../matching_arbiter.sv
+../call_auction_engine.sv
+../banked_call_auction.sv
+../auction_codes.svh
+../auction_bank_codes.svh
+cohort_properties.svh
+bank_schedule_properties.svh

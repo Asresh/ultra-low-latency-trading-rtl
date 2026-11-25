@@ -64,8 +64,11 @@ dependent command becomes eligible after its predecessor records
 success. A session may contain independent commands that dispatch
 out of sequence. The round-robin selector visits eligible rows. A
 positive lifetime starts at admission and counts down each clock while
-the command is queued, including during a held offer. The final
-positive lifetime edge is eligible for dispatch.
+the command is queued, including during a held offer. With no held
+offer, a selected command can transfer on its first eligible edge.
+A lifetime of one can transfer on that edge when the sink is ready.
+If the sink stalls on that edge, the offer stays visible and loses
+applicability once the lifetime reaches zero.
 
 **Hand off only when `m_valid && m_ready && m_applicable`.** The
 offer locks a stable tuple after publication. Expiry, a same-edge
@@ -106,15 +109,16 @@ epoch. The upstream system owns durable session and order history.
 
 ![A dependent order waits through another session's dispatch until its predecessor succeeds](causal-waveform.svg)
 
-The first session sends sequence 1 at 245 ns. The second session
-sends sequence 8 at 275 ns while the first session's child still
+The first session sends sequence 1 at 235 ns. The second session
+sends sequence 8 at 255 ns while the first session's child still
 waits. The predecessor's successful acknowledgment transfers at
-465 ns. The held child then transfers at 575 ns. Later cases check
+445 ns. The held child then transfers at 555 ns. Later cases check
 a child rejected after parent failure, an expired held offer, a
 conflict competing with egress on the same edge, safe reclamation,
-and epoch and sequence exhaustion.
+epoch and sequence exhaustion, and lifetime-one offers with ready
+and stalled sinks.
 
-`make causal-test` checks six dispatches, two revoked offers, nine
+`make causal-test` checks seven dispatches, three revoked offers, eleven
 terminal results, full-window pressure, and wrong-epoch, duplicate,
 and conflicting acknowledgments. The independent host trace audit
 checks that every dependent transmission has an earlier successful
@@ -124,5 +128,5 @@ the actual leased scheduler. Refunding a descriptor's lease leaves
 its dependent command blocked until the separate venue acknowledgment.
 The 18-edge reduced formal check proves the held-port,
 dependency, lifetime, and retained-row assertions over its bound,
-with four reachability scenarios. Use `make causal-waveform` to
+with five reachability scenarios. Use `make causal-waveform` to
 reproduce the checked trace and figure.

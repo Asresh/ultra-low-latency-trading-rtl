@@ -110,8 +110,9 @@ module causal_order_gate #(
     logic [3:0] control_status;
     logic [ROW_W-1:0] send_cursor, send_slot, send_hold, result_cursor, result_slot, result_hold;
     logic send_found,result_found,held,published;
+    wire [ROW_W-1:0] send_index=held ? send_hold : send_slot;
     wire [ROW_W-1:0] result_index=published ? result_hold : result_slot;
-    wire [BANK_W-1:0] send_bank=BANK_W'(int'(send_hold)/WINDOW);
+    wire [BANK_W-1:0] send_bank=BANK_W'(int'(send_index)/WINDOW);
     wire [BANK_W-1:0] result_bank=BANK_W'(int'(result_index)/WINDOW);
 
     assign reply_valid=!rst && receipt_pending;
@@ -129,11 +130,11 @@ module causal_order_gate #(
 
     assign s_ready=!rst && (s_status!=OK || has_space);
     wire enqueues=s_valid && s_ready && s_status==OK;
-    assign m_valid=!rst && held;
-    assign m_applicable=m_valid && ready_to_send[send_hold];
+    assign m_valid=!rst && (held || send_found);
+    assign m_applicable=m_valid && ready_to_send[send_index];
     assign {m_session,m_epoch,m_sequence,m_cost,m_tag,m_payload}=
-        {SESSION_W'(send_bank),epoch[send_bank],row_sequence[send_hold],costs[send_hold],
-         row_tag[send_hold],payloads[send_hold]};
+        {SESSION_W'(send_bank),epoch[send_bank],row_sequence[send_index],costs[send_index],
+         row_tag[send_index],payloads[send_index]};
     assign d_valid=!rst && (published || result_found);
     assign {d_session,d_epoch,d_sequence,d_tag,d_status}=
         {SESSION_W'(result_bank),epoch[result_bank],row_sequence[result_index],
@@ -318,16 +319,19 @@ module causal_order_gate #(
                 end
             end
 
-            if (m_valid && m_ready) begin
-                held<=0;
-                if (m_applicable) begin
-                    state[send_hold]<=SENT;
-                    submitted[send_hold]<=1;
+            if (m_valid) begin
+                if (!held)
+                    send_cursor<=next_row(send_index);
+                if (m_ready) begin
+                    held<=0;
+                    if (m_applicable) begin
+                        state[send_index]<=SENT;
+                        submitted[send_index]<=1;
+                    end
+                end else if (!held) begin
+                    held<=1;
+                    send_hold<=send_index;
                 end
-            end else if (!held && send_found) begin
-                held<=1;
-                send_hold<=send_slot;
-                send_cursor<=next_row(send_slot);
             end
 
             if (take_ack) begin
@@ -366,12 +370,12 @@ module causal_order_gate #(
                 assert(m_valid && $stable({m_session,m_epoch,m_sequence,m_cost,m_tag,m_payload}));
             if ($past(d_valid && !d_ready))
                 assert(d_valid && $stable({d_session,d_epoch,d_sequence,d_tag,d_status}));
-            if (m_applicable && dependent[send_hold])
-                assert (state[predecessor[send_hold]]==DONE && terminal[predecessor[send_hold]]==SUCCESS);
+            if (m_applicable && dependent[send_index])
+                assert (state[predecessor[send_index]]==DONE && terminal[predecessor[send_index]]==SUCCESS);
             if (m_applicable)
-                assert (armed[send_bank] && ttl[send_hold] != 0 && state[send_hold]==WAITING);
+                assert (armed[send_bank] && ttl[send_index]!=0 && state[send_index]==WAITING);
             if (m_valid)
-                assert (state[send_hold]!=EMPTY);
+                assert (state[send_index]!=EMPTY && (held || m_applicable));
             for (integer row=0;row<ROWS;row=row+1) begin
                 if (state[row]==WAITING && dependent[row]) begin
                     assert (state[predecessor[row]]!=EMPTY);
@@ -381,7 +385,8 @@ module causal_order_gate #(
                 if (unread[row])
                     assert (state[row]==DONE);
             end
-            cover (m_applicable && m_ready && dependent[send_hold]);
+            cover (m_applicable && m_ready && dependent[send_index]);
+            cover (m_applicable && m_ready && !held && ttl[send_index]==1);
             cover (m_valid && m_ready && !m_applicable);
             cover (d_valid && d_status==DEPENDENCY_FAILED);
             cover (conflict);

@@ -276,7 +276,26 @@ module tb_causal_order_gate;
         control(0,0,3,3,1,4,1);
         if({stale_acks,duplicate_acks,conflicting_acks} !== {32'd1,32'd1,32'd1})
             $fatal(1,"acknowledgment classifications differ");
-        if(submitted!=6 || waived!=2 || retired!=9)
+
+        control(2,1,1,1,10,0,1);
+        m_ready=1;
+        source(1,1,11,0,0,1,0);
+        expect_action(1,1,11,1);
+        @(negedge clk);
+        m_ready=0;
+        if(submitted!=7) $fatal(1,"ready sink missed the sole positive lifetime edge");
+        acknowledge(1,1,11,1);
+        outcome(1,1,11,0);
+        control(2,1,1,1,11,0,1);
+
+        source(1,1,12,0,0,1,0);
+        expect_action(1,1,12,1);
+        @(negedge clk);
+        expect_action(1,1,12,0);
+        outcome(1,1,12,3);
+        expect_action(1,1,12,0);
+        transmit();
+        if(submitted!=7 || waived!=3 || retired!=11)
             $fatal(1,"terminal conservation differs: sends=%0d waived=%0d outcomes=%0d",submitted,waived,retired);
         $display("PASS causal gate sends=%0d waived=%0d terminal=%0d",submitted,waived,retired);
         if(capture) $fclose(capture);

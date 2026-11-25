@@ -5,7 +5,10 @@ Convert packets between two different bus widths while preserving byte order, th
 The core teaching example is `packet_gearbox.sv`. It collects a frame before publishing it. The companion `streaming_gearbox.sv` demonstrates the smaller buffer needed when the upstream already guarantees framing.
 
 Use the optional [integrity-checking gearbox](docs/integrity.md) for captured
-or transported frames with a trusted byte count and CRC descriptor.
+or transported frames with a trusted byte count and CRC descriptor. An
+[asynchronous companion](docs/async.md) moves packets and diagnostics
+between independent clocks and acknowledges an ordered drain barrier
+after older output frames retire.
 
 ```mermaid
 flowchart LR

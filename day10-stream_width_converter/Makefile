@@ -35,7 +35,7 @@ $(BUILD)/duplex.vvp: tb_stream_width_converter.sv $(RTL) rtl.f | $(BUILD)
 $(BUILD)/faults.vvp: tb_gearbox_faults.sv packet_gearbox.sv | $(BUILD)
 	$(IVERILOG) -g2012 -s tb_gearbox_faults -o $@ $^
 
-test: integrity-test $(BUILD)/faults.vvp $(BUILD)/duplex.vvp $(BUILD)/stream_up.vvp $(BUILD)/stream_odd.vvp $(BUILD)/up $(BUILD)/down $(BUILD)/odd $(BUILD)/tiny
+test: integrity-test async-test $(BUILD)/faults.vvp $(BUILD)/duplex.vvp $(BUILD)/stream_up.vvp $(BUILD)/stream_odd.vvp $(BUILD)/up $(BUILD)/down $(BUILD)/odd $(BUILD)/tiny
 	$(PYTHON) -B -m unittest discover -v
 	$(VVP) $(BUILD)/faults.vvp
 	$(VVP) $(BUILD)/duplex.vvp
@@ -50,11 +50,11 @@ test: integrity-test $(BUILD)/faults.vvp $(BUILD)/duplex.vvp $(BUILD)/stream_up.
 	$(PYTHON) -B width_demo.py $(BUILD)/up $(BUILD)/lesson --vvp "$(VVP)"
 	$(PYTHON) -B width_campaign.py $(BUILD)/campaign --iverilog "$(IVERILOG)" --vvp "$(VVP)"
 
-lint: integrity-lint
+lint: integrity-lint async-lint
 	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
 	$(VERILATOR) --lint-only -Wall --top-module streaming_gearbox -f rtl.f
 
-synth: integrity-synth | $(BUILD)
+synth: integrity-synth async-synth | $(BUILD)
 	$(YOSYS) -Q -q -l $(BUILD)/synth.log -m slang -p 'read_slang --top $(TOP) $(RTL); synth -top $(TOP) -noabc; check -assert; stat'
 	$(YOSYS) -Q -q -l $(BUILD)/streaming-synth.log -m slang -p 'read_slang --top streaming_gearbox $(RTL); synth -top streaming_gearbox -noabc; check -assert; stat'
 	tail -n 20 $(BUILD)/synth.log
@@ -68,7 +68,7 @@ clean:
 
 .PHONY: waveform
 
-waveform: $(BUILD)/up ../scripts/render_vcd_waveform.py integrity-waveform
+waveform: $(BUILD)/up ../scripts/render_vcd_waveform.py integrity-waveform async-waveform
 	$(PYTHON) -B width_demo.py $< $(BUILD)/waveform --vvp "$(VVP)" --waveform $(BUILD)/stream_width_converter.vcd
 	mkdir -p docs
 	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/stream_width_converter.vcd docs/waveform.svg \
@@ -127,3 +127,50 @@ integrity-waveform: $(BUILD)/integrity-main.vvp $(BUILD)/integrity-main/audit.tx
 		--signal 'tb_integrity_gearbox.m_valid=Packet valid' \
 		--signal 'tb_integrity_gearbox.m_ready=Packet ready' \
 		--signal 'tb_integrity_gearbox.m_keep=Output byte mask'
+
+ASYNC_COMMON := ../day06-multiclock_latency_telemetry
+ASYNC_RTL := async_integrity_gearbox.sv $(INTEGRITY_RTL) $(ASYNC_COMMON)/latency_async_fifo.sv $(ASYNC_COMMON)/latency_reset_sync.sv
+ASYNC_TB := tb_async_integrity_gearbox
+.PHONY: async-test async-lint async-synth async-waveform
+
+define async_case
+$(BUILD)/async-$(1).vvp: $(ASYNC_TB).sv $(ASYNC_RTL) | $(BUILD)
+	$(IVERILOG) -g2012 -s $(ASYNC_TB) -P$(ASYNC_TB).IN_BYTES=$(2) -P$(ASYNC_TB).OUT_BYTES=$(3) \
+		-P$(ASYNC_TB).MAX_FRAME=$(4) -P$(ASYNC_TB).SOURCE_HALF=$(5) -P$(ASYNC_TB).DEST_HALF=$(6) \
+		-P$(ASYNC_TB).IN_ADDR_W=$(7) -P$(ASYNC_TB).AUDIT_ADDR_W=$(8) -o $$@ $$^
+
+$(BUILD)/async-$(1)/commands.txt: async_integrity_vectors.py integrity_vectors.py | $(BUILD)
+	$(PYTHON) -B async_integrity_vectors.py $(BUILD)/async-$(1) --in-bytes $(2) --out-bytes $(3) \
+		--capacity $(4) --seed $(9)
+
+.PHONY: async-$(1)
+async-$(1): $(BUILD)/async-$(1).vvp $(BUILD)/async-$(1)/commands.txt
+	$(VVP) $$< +vectors=$(BUILD)/async-$(1)
+endef
+
+$(eval $(call async_case,main,4,8,64,3,5,2,1,98229))
+$(eval $(call async_case,odd,5,3,61,7,3,1,3,97011))
+$(eval $(call async_case,tiny,1,2,3,4,5,3,1,77541))
+
+async-test: async-main async-odd async-tiny
+
+async-lint:
+	$(VERILATOR) --lint-only -Wall -Wno-SYNCASYNCNET --top-module async_integrity_gearbox $(ASYNC_RTL)
+
+async-synth: | $(BUILD)
+	$(YOSYS) -Q -q -l $(BUILD)/async-synth.log -m slang -p 'read_slang --top async_integrity_gearbox $(ASYNC_RTL); synth -top async_integrity_gearbox -noabc; check -assert; stat'
+
+async-waveform: $(BUILD)/async-main.vvp $(BUILD)/async-main/commands.txt
+	$(VVP) $< +vectors=$(BUILD)/async-main +wave=$(BUILD)/async.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/async.vcd docs/async.svg \
+		--start 990 --end 1150 --title 'Width converter · A drain barrier waits on destination packet completion' \
+		--signal '$(ASYNC_TB).barrier_valid=Source barrier valid' \
+		--signal '$(ASYNC_TB).barrier_ready=Source barrier ready' \
+		--signal '$(ASYNC_TB).dut.seen_barrier=Barrier at destination head' \
+		--signal '$(ASYNC_TB).dut.emit_barrier=Destination acknowledgment permitted' \
+		--signal '$(ASYNC_TB).m_valid=Destination packet valid' \
+		--signal '$(ASYNC_TB).m_ready=Destination packet ready' \
+		--signal '$(ASYNC_TB).m_last=Destination packet last' \
+		--signal '$(ASYNC_TB).audit_valid=Source audit valid' \
+		--signal '$(ASYNC_TB).audit_barrier=Source audit is barrier' \
+		--signal '$(ASYNC_TB).audit_tag=Source audit tag'

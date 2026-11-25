@@ -16,5 +16,6 @@
 `define DC_BAD_EVENT 4'd10
 `define DC_RESTART 4'd11
 `define DC_BAD_RESTART 4'd12
+`define DC_BAD_NAMESPACE 4'd13
 
 `endif

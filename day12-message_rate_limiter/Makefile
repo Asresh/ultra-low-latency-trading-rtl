@@ -10,12 +10,15 @@ RTL := $(shell cat rtl.f)
 TOP := message_rate_limiter
 HIERARCHY_RTL := $(shell cat rtl_hierarchical.f)
 HIERARCHY_TOP := hierarchical_rate_limiter
+DEFERRED_RTL := $(shell cat rtl_deferred.f)
+DEFERRED_TOP := deferred_rate_scheduler
 
 .PHONY: all test test-python test-refill test-matrix test-workload test-gate test-netlist lint synth formal clean
 .PHONY: test-hierarchy waveform-hierarchy
+.PHONY: test-deferred waveform-deferred formal-deferred
 all: test
 
-test: test-python test-refill test-matrix test-workload test-gate test-hierarchy
+test: test-python test-refill test-matrix test-workload test-gate test-hierarchy test-deferred
 
 test-python:
 	$(PYTHON) -B -m unittest discover
@@ -36,6 +39,23 @@ test-gate:
 
 test-hierarchy:
 	$(PYTHON) -B run_hierarchical_limiter.py --iverilog "$(IVERILOG)" --vvp "$(VVP)"
+
+test-deferred:
+	$(PYTHON) -B run_deferred_scheduler.py --iverilog "$(IVERILOG)" --vvp "$(VVP)"
+
+waveform-deferred:
+	$(PYTHON) -B run_deferred_scheduler.py --example --iverilog "$(IVERILOG)" --vvp "$(VVP)" \
+		--wave build/deferred/example/deferred.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/deferred/example/deferred.vcd deferred_waveform.svg \
+		--start 70 --end 535 --title 'Deferred limiter · A blocked tenant does not hold another tenant' \
+		--signal 'tb_deferred_rate_scheduler.s_valid=Ingress valid' \
+		--signal 'tb_deferred_rate_scheduler.s_tag=Ingress tag' \
+		--signal 'tb_deferred_rate_scheduler.occupancy=Packed queue occupancy' \
+		--signal 'tb_deferred_rate_scheduler.m_valid=Result valid' \
+		--signal 'tb_deferred_rate_scheduler.m_ready=Result ready' \
+		--signal 'tb_deferred_rate_scheduler.m_tag=Result tag' \
+		--signal 'tb_deferred_rate_scheduler.m_status=Result status' \
+		--signal 'tb_deferred_rate_scheduler.m_ttl=Remaining queue lifetime'
 
 waveform-hierarchy:
 	$(PYTHON) -B run_hierarchical_limiter.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" \
@@ -66,14 +86,20 @@ lint:
 	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
 	$(VERILATOR) --lint-only -Wall --top-module message_rate_gate -f rtl.f
 	$(VERILATOR) --lint-only -Wall --top-module $(HIERARCHY_TOP) -f rtl_hierarchical.f
+	$(VERILATOR) --lint-only -Wall --top-module $(DEFERRED_TOP) -f rtl_deferred.f
 
 synth: | build
 	$(YOSYS) -Q -q -T -l build/rate-limiter-synth.log -m slang -p 'read_slang --top $(TOP) $(RTL); synth -top $(TOP); check -assert; stat; write_json build/limiter.json; write_verilog -noattr build/limiter-netlist.v'
 	$(YOSYS) -Q -q -T -l build/rate-gate-synth.log -m slang -p 'read_slang --top message_rate_gate $(RTL); synth -top message_rate_gate; check -assert; stat; write_json build/gate.json'
 	$(YOSYS) -Q -q -T -l build/rate-hierarchy-synth.log -m slang -p 'read_slang --top $(HIERARCHY_TOP) $(HIERARCHY_RTL); synth -top $(HIERARCHY_TOP); check -assert; stat; write_json build/hierarchy.json'
+	$(YOSYS) -Q -q -T -l build/deferred-synth.log -m slang -p 'read_slang --top $(DEFERRED_TOP) $(DEFERRED_RTL); synth -top $(DEFERRED_TOP); check -assert; stat; write_json build/deferred.json'
 
 formal: | build
 	cd formal && $(SBY) -f --prefix ../build/formal limiter.sby
+
+formal-deferred:
+	mkdir -p build/deferred
+	cd formal && $(SBY) -f --prefix ../build/deferred/formal deferred.sby
 
 clean:
 	rm -rf build

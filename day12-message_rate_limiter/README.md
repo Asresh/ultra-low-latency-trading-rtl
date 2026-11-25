@@ -6,6 +6,8 @@ A key can represent a class of gateway traffic or an individual session. A confi
 
 The [hierarchical limiter](hierarchical_limiter.md) adds atomic port, group and session budgets with protected capacity for authenticated control sessions. Its [RTL waveform](hierarchy_waveform.svg) shows how a control session uses group headroom after an ordinary offer is limited.
 
+The [deferred scheduler](deferred_scheduler.md) queues messages per session and retries admission with bounded lifetimes. It gives ready tenants a chance to advance while another tenant waits for credit.
+
 ## Work through one bucket
 
 Set capacity to four tokens and refill to one token per tick. Configuring the bucket starts it full.
@@ -127,7 +129,7 @@ The `tune` subcommand takes a single-key `tick,cost` trace and evaluates explici
 
 The unblocked default burst delivered 266 decisions in consecutive cycles after warm-up. Every decision in that run transferred one cycle after acceptance. Latency and throughput measurements come from RTL simulation. The resource report comes from generic synthesis. Increasing key count adds a table read mux and update decoding, while wider ticks and refill rates enlarge the refill arithmetic.
 
-The source inventory counts 357 substantive RTL lines and 4,671 verification and tooling lines for a total of 5,028. It excludes comments and generated build outputs.
+The source inventory counts 943 RTL lines and 6,007 verification and tooling lines across the direct limiter, hierarchical limiter and deferred scheduler. It excludes comments and generated build outputs.
 
 ## Checked simulation waveform
 

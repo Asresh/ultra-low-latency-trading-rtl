@@ -2,6 +2,8 @@
 
 An FPGA RTL engine for independently matching multiple instruments on bounded tick grids. It accepts a single command stream, executes independent books concurrently, and publishes tagged events through a shared round-robin arbiter. The executable verification checks the transaction semantics, cycle-level flow control, queue invariants, and measured throughput.
 
+The project also includes a [reserve-order and checkpoint engine](docs/reserve_matcher.md) with iceberg replenishment, self-trade prevention, fill-or-kill, and atomic per-instrument restore. Its [simulation waveform](docs/reserve_waveform.svg) shows a replenished maker losing priority to an older order at the same price.
+
 | Default hardware | Value |
 | --- | ---: |
 | Independent instruments | 3 |

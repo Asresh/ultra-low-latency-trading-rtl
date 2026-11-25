@@ -6,6 +6,7 @@ VVP ?= vvp
 VERILATOR ?= verilator
 YOSYS ?= yosys
 NEXTPNR ?= nextpnr-ecp5
+SBY ?= sby
 SEED ?= 7201
 COMMANDS ?= 4000
 BUILD ?= build
@@ -13,19 +14,29 @@ RTL := $(shell cat rtl.f)
 TOP := banked_matching_engine
 TB := tb_banked_matching_engine
 PROFILE ?= default
+RESERVE_TOP := reserve_matching_engine
+RESERVE_TB := tb_reserve_matching_engine
+RESERVE_RTL := $(shell cat rtl_reserve.f)
+RESERVE_BUILD := $(BUILD)/reserve
+RESERVE_SEED ?= 9253
+RESERVE_COMMANDS ?= 2400
+RESERVE_PROFILES := default odd tiny
 
-.PHONY: all test unit regress lint synth route report clean
+.PHONY: all test legacy-test unit regress lint synth route report clean
+.PHONY: reserve-test reserve-regress reserve-unit reserve-demo lint-reserve synth-reserve formal-reserve waveform-reserve
 all: test
 
-test: unit $(BUILD)/$(PROFILE)/engine.vvp
+test: legacy-test reserve-test
+
+legacy-test: unit $(BUILD)/$(PROFILE)/engine.vvp
 	$(PYTHON) -B verify_matching.py run --profile $(PROFILE) --seed $(SEED) --commands $(COMMANDS) \
 		--vvp "$(VVP)" --sim $(BUILD)/$(PROFILE)/engine.vvp --build $(BUILD)/$(PROFILE)
 
-regress:
-	$(MAKE) test PROFILE=default SEED=7201
-	$(MAKE) test PROFILE=default SEED=39119
-	$(MAKE) test PROFILE=wide SEED=9109
-	$(MAKE) test PROFILE=tiny SEED=9887
+regress: reserve-regress
+	$(MAKE) legacy-test PROFILE=default SEED=7201
+	$(MAKE) legacy-test PROFILE=default SEED=39119
+	$(MAKE) legacy-test PROFILE=wide SEED=9109
+	$(MAKE) legacy-test PROFILE=tiny SEED=9887
 
 unit: $(BUILD)/transport.vvp
 	$(VVP) $<
@@ -46,12 +57,60 @@ $(BUILD)/transport.vvp: matching_fifo.sv matching_arbiter.sv tb_matching_transpo
 	mkdir -p $(dir $@)
 	$(IVERILOG) -g2012 -Wall -s tb_matching_transport -o $@ $^
 
-lint:
+lint: lint-reserve
 	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
 
-synth:
+synth: synth-reserve
 	mkdir -p $(BUILD)
 	$(YOSYS) -Q -l $(BUILD)/synth.log -p 'read_verilog -sv $(RTL); synth -top $(TOP); check -assert; stat; write_json $(BUILD)/$(TOP).json'
+
+$(RESERVE_BUILD)/%/engine.vvp: $(RESERVE_RTL) reserve_codes.svh $(RESERVE_TB).sv rtl_reserve.f reserve_verify.py reserve_model.py Makefile
+	mkdir -p $(dir $@)
+	params=$$($(PYTHON) -B reserve_verify.py params --profile $*) && \
+	$(IVERILOG) -g2012 -s $(RESERVE_TB) $$params -o $@ -f rtl_reserve.f $(RESERVE_TB).sv
+
+reserve-unit:
+	$(PYTHON) -B -m unittest -v test_reserve_model test_reserve_checkpoint
+
+reserve-test: reserve-unit reserve-demo $(RESERVE_BUILD)/default/engine.vvp
+	$(PYTHON) -B reserve_verify.py run --profile default --seed $(RESERVE_SEED) --commands $(RESERVE_COMMANDS) \
+		--vvp "$(VVP)" --sim $(RESERVE_BUILD)/default/engine.vvp --build $(RESERVE_BUILD)/default
+
+reserve-regress: reserve-unit reserve-demo $(foreach p,$(RESERVE_PROFILES),$(RESERVE_BUILD)/$(p)/engine.vvp)
+	@set -e; for profile in $(RESERVE_PROFILES); do \
+		$(PYTHON) -B reserve_verify.py run --profile $$profile --seed $(RESERVE_SEED) --commands $(RESERVE_COMMANDS) \
+			--vvp "$(VVP)" --sim $(RESERVE_BUILD)/$$profile/engine.vvp --build $(RESERVE_BUILD)/$$profile; \
+	done
+
+reserve-demo: $(RESERVE_BUILD)/default/engine.vvp
+	$(PYTHON) -B reserve_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/example
+
+waveform-reserve: $(RESERVE_BUILD)/default/engine.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B reserve_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/waveform \
+		--waveform $(RESERVE_BUILD)/waveform/source.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(RESERVE_BUILD)/waveform/source.vcd docs/reserve_waveform.svg \
+		--start 165 --end 275 --title 'Day 02 · Reserve priority and checkpoint order' \
+		--signal 'tb_reserve_matching_engine.clk=Clock' \
+		--signal 'tb_reserve_matching_engine.m_valid=Event valid' \
+		--signal 'tb_reserve_matching_engine.m_ready=Event ready' \
+		--signal 'tb_reserve_matching_engine.m_tag=Command tag' \
+		--signal 'tb_reserve_matching_engine.m_kind=Event kind' \
+		--signal 'tb_reserve_matching_engine.m_maker=Maker or row ID' \
+		--signal 'tb_reserve_matching_engine.m_quantity=Fill quantity' \
+		--signal 'tb_reserve_matching_engine.m_refresh=Reserve refilled' \
+		--signal 'tb_reserve_matching_engine.m_last=Terminal event'
+
+lint-reserve:
+	$(VERILATOR) --lint-only -Wall --top-module $(RESERVE_TOP) -f rtl_reserve.f
+
+synth-reserve:
+	mkdir -p $(RESERVE_BUILD)
+	$(YOSYS) -Q -q -l $(RESERVE_BUILD)/synth.log -p 'read_verilog -sv $(RESERVE_RTL); synth -top $(RESERVE_TOP) -noabc; check -assert; stat; write_json $(RESERVE_BUILD)/$(RESERVE_TOP).json'
+	tail -n 24 $(RESERVE_BUILD)/synth.log
+
+formal-reserve:
+	mkdir -p $(RESERVE_BUILD)
+	cd formal && $(SBY) -f --prefix ../$(RESERVE_BUILD)/formal reserve.sby
 
 route:
 	mkdir -p $(BUILD)

@@ -1,7 +1,9 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module tb_dma_queue_table;
+module tb_dma_queue_table #(
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0
+);
     localparam integer QUEUES = 3;
     localparam integer RING_LOG = 2;
     localparam integer DEPTH = 1 << RING_LOG;
@@ -30,7 +32,9 @@ module tb_dma_queue_table;
     wire [31:0] inspect_sq_head, inspect_sq_tail, inspect_cq_head, inspect_cq_tail;
     wire [7:0] inspect_irq_backlog;
 
-    dma_queue_table #(.QUEUES(QUEUES), .RING_LOG(RING_LOG)) dut (.*);
+    dma_queue_table #(
+        .QUEUES(QUEUES), .RING_LOG(RING_LOG), .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION)
+    ) dut (.*);
 
     logic q_enabled [0:QUEUES-1];
     logic [63:0] sq [0:QUEUES-1], cq [0:QUEUES-1];
@@ -65,8 +69,10 @@ module tb_dma_queue_table;
     endfunction
 
     // Validate base alignment, address bounds and nonoverlapping rings.
-    function automatic logic valid_layout;
+    function automatic logic valid_layout(input integer configured_queue);
         logic [64:0] sq_start, sq_limit, cq_start, cq_limit, data_low, data_high;
+        logic [64:0] candidate_start [0:2], candidate_end [0:2];
+        logic [64:0] peer_start [0:2], peer_end [0:2];
         begin
             sq_start = {1'b0, cfg_submission_base};
             sq_limit = sq_start + DEPTH * 32;
@@ -80,6 +86,23 @@ module tb_dma_queue_table;
                            disjoint(sq_start, sq_limit, cq_start, cq_limit) &&
                            disjoint(sq_start, sq_limit, data_low, data_high) &&
                            disjoint(cq_start, cq_limit, data_low, data_high);
+            if (ENFORCE_QUEUE_ISOLATION) begin
+                candidate_start[0] = sq_start; candidate_end[0] = sq_limit;
+                candidate_start[1] = cq_start; candidate_end[1] = cq_limit;
+                candidate_start[2] = data_low; candidate_end[2] = data_high;
+                for (int owner = 0; owner < QUEUES; owner++) begin
+                    if (owner != configured_queue && q_enabled[owner]) begin
+                        peer_start[0] = {1'b0, sq[owner]}; peer_end[0] = peer_start[0] + DEPTH*32;
+                        peer_start[1] = {1'b0, cq[owner]}; peer_end[1] = peer_start[1] + DEPTH*32;
+                        peer_start[2] = {1'b0, payload_l[owner]}; peer_end[2] = {1'b0, payload_h[owner]};
+                        for (int candidate = 0; candidate < 3; candidate++)
+                            for (int region = 0; region < 3; region++)
+                                if (!disjoint(candidate_start[candidate], candidate_end[candidate],
+                                              peer_start[region], peer_end[region]))
+                                    valid_layout = 1'b0;
+                    end
+                end
+            end
         end
     endfunction
 
@@ -138,7 +161,7 @@ module tb_dma_queue_table;
                 accepted_c = (!q_enabled[c] ||
                               (submission_head[c] == submission_tail[c] &&
                                completion_head[c] == completion_tail[c])) &&
-                             (!cfg_enable || valid_layout());
+                             (!cfg_enable || valid_layout(c));
             end
             if (will_host && h < QUEUES && q_enabled[h]) begin
                 occupied = distance(submission_tail[h], submission_head[h]);
@@ -307,6 +330,80 @@ module tb_dma_queue_table;
         end
     endtask
 
+    // Mutate each candidate region against each occupied peer interval.
+    task automatic isolate_pairs;
+        logic [63:0] end_of_owner [0:2];
+        int rejected_pairs = 0;
+        end_of_owner[0] = sq[0] + DEPTH*32;
+        end_of_owner[1] = cq[0] + DEPTH*32;
+        end_of_owner[2] = payload_h[0];
+        selected = 2;
+        inspect_queue = 2;
+        for (int candidate = 0; candidate < 3; candidate++) begin
+            for (int owner_region = 0; owner_region < 3; owner_region++) begin
+                @(negedge clk);
+                idle_inputs();
+                drive_config(2,1,9876,3,6);
+                case (candidate)
+                    0: cfg_submission_base = end_of_owner[owner_region] - 32;
+                    1: cfg_completion_base = end_of_owner[owner_region] - 32;
+                    2: begin
+                        cfg_payload_low = end_of_owner[owner_region] - 8;
+                        cfg_payload_high = end_of_owner[owner_region] + 8;
+                    end
+                endcase
+                step();
+                if (!cfg_ack || cfg_ok || inspect_sq_head != 89 || inspect_cq_tail != 89)
+                    $fatal(1, "overlap %0d/%0d changed an active layout",candidate,owner_region);
+                rejected_pairs++;
+            end
+        end
+        @(negedge clk);
+        idle_inputs();
+        drive_config(2,1,1234,1,2);
+        cfg_submission_base = end_of_owner[0];
+        cfg_completion_base = end_of_owner[1];
+        cfg_payload_low = end_of_owner[2];
+        cfg_payload_high = end_of_owner[2] + 8;
+        step();
+        if (!cfg_ok || inspect_sq_head != 1234)
+            $fatal(1, "legal half-open endpoint adjacency was rejected");
+        @(negedge clk);
+        // Replacing one's own unchanged layout does not conflict with itself.
+        cfg_seed = 1235;
+        step();
+        if (!cfg_ok || inspect_sq_head != 1235) $fatal(1, "own layout blocked replacement");
+        @(negedge clk);
+        drive_config(0,0,18,0,0);
+        step();
+        if (cfg_ok) $fatal(1, "owner with outstanding slots was disabled");
+        @(negedge clk);
+        drive_config(2,1,211,1,2);
+        cfg_payload_low = sq[0];
+        cfg_payload_high = sq[0] + 8;
+        step();
+        if (cfg_ok) $fatal(1, "rejected disable released ownership");
+        @(negedge clk);
+        drive_config(1,0,18,0,0);
+        step();
+        if (!cfg_ok) $fatal(1, "drained owner did not release its regions");
+        @(negedge clk);
+        drive_config(2,1,1337,1,2);
+        cfg_submission_base = sq[1];
+        cfg_completion_base = cq[1];
+        cfg_payload_low = payload_l[1];
+        cfg_payload_high = payload_h[1];
+        step();
+        if (!cfg_ok) $fatal(1, "disabled owner's regions could not be reused");
+        @(negedge clk);
+        drive_config(2,1,89,2,6);
+        step();
+        @(negedge clk);
+        drive_config(1,1,48,0,3);
+        step();
+        $display("PASS DMA isolation: %0d pairwise conflicts, adjacency, own replacement and handoff", rejected_pairs);
+    endtask
+
     // Advance the deterministic pseudo-random sequence used as fixture data.
     function automatic [31:0] scramble(input logic [31:0] value);
         logic [31:0] x;
@@ -341,6 +438,7 @@ module tb_dma_queue_table;
         repeat (3) @(negedge clk);
         reset = 0;
         direct();
+        if (ENFORCE_QUEUE_ISOLATION) isolate_pairs();
         for (integer t = 0; t < 2200; t = t + 1) begin
             @(negedge clk);
             idle_inputs();

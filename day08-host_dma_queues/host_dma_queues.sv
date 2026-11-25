@@ -8,6 +8,8 @@ module host_dma_queues #(
     parameter integer MAX_PACKET_BYTES = 512,
     parameter integer MAX_BURST = 16,
     parameter integer CAPTURE_TIMEOUT = 128,
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0,
+    parameter integer MAX_SEGMENTS = 8,
     localparam integer Q_W = QUEUES > 1 ? $clog2(QUEUES) : 1,
     localparam integer WORDS = (MAX_PACKET_BYTES + 7) / 8,
     localparam integer WORD_W = (WORDS > 1) ? $clog2(WORDS) : 1,
@@ -105,13 +107,16 @@ module host_dma_queues #(
     output logic [63:0] pull_bytes,
     output logic [63:0] push_bytes
 );
-    localparam logic [3:0] IDLE = 0, DESC_CMD = 1, DESC_READ = 2, CHECK = 3,
-                           PULL_CMD = 4, PULL_READ = 5, PULL_SEND = 6,
+    localparam logic [4:0] IDLE = 0, DESC_CMD = 1, DESC_READ = 2, CHECK = 3,
+                           PAYLOAD_READ_CMD = 4, PAYLOAD_READ = 5, PULL_SEND = 6,
                            PUSH_OFFER = 7, PUSH_COLLECT = 8, PUSH_DRAIN = 9,
                            PUSH_CMD = 10, PUSH_WRITE = 11, COMPLETE_CMD = 12,
-                           COMPLETE_WRITE = 13, FAILED = 14;
+                           COMPLETE_WRITE = 13, FAILED = 14, TABLE_CMD = 15,
+                           TABLE_READ = 16, TABLE_VALIDATE = 17;
+    localparam integer SEG_W = MAX_SEGMENTS > 1 ? $clog2(MAX_SEGMENTS) : 1;
+    localparam integer TABLE_W = $clog2(2*MAX_SEGMENTS);
 
-    logic [3:0] state;
+    logic [4:0] state;
     logic [Q_W-1:0] cursor, queue_q, pick_queue;
     logic found_queue;
     wire [QUEUES-1:0] eligible;
@@ -124,6 +129,13 @@ module host_dma_queues #(
     logic [WAIT_W-1:0] wait_count;
     logic [7:0] completion_status;
     logic [31:0] completion_count, completion_crc;
+    logic [31:0] write_digest;
+    logic [63:0] segment_address [0:MAX_SEGMENTS-1];
+    logic [31:0] segment_length [0:MAX_SEGMENTS-1];
+    logic segment_reserved [0:MAX_SEGMENTS-1];
+    logic [SEG_W-1:0] segment;
+    logic [TABLE_W-1:0] table_word;
+    logic [31:0] validated_bytes;
     logic [63:0] completion_tick;
     logic abort_q;
 
@@ -135,21 +147,57 @@ module host_dma_queues #(
     wire [63:0] cookie = descriptor[191:128];
     wire [31:0] expected_crc = descriptor[223:192];
     wire [31:0] reserved_word = descriptor[255:224];
+    wire is_segmented = operation == `DMA_GATHER || operation == `DMA_SCATTER ||
+        operation == `DMA_SEGMENT_DIGEST;
+    wire is_readback = operation == `DMA_READBACK || operation == `DMA_SEGMENT_DIGEST;
+    wire is_pull = operation == `DMA_PULL || operation == `DMA_GATHER;
+    wire is_push = operation == `DMA_PUSH || operation == `DMA_SCATTER;
     wire [32:0] rounded_length = ({1'b0,length} + 33'd7) & ~33'd7;
     wire [64:0] payload_end = {1'b0,address} + 65'(rounded_length);
+    wire [64:0] table_end = {1'b0,address} + (65'(reserved_word) << 4);
+    wire [63:0] transfer_address = is_segmented ? segment_address[segment] : address;
+    wire [31:0] transfer_bytes = is_segmented ? segment_length[segment] : length;
+    wire more_segments = is_segmented && 32'(segment) + 1 < reserved_word;
 
     wire transfer_shape_ok =
-        length != 0 && length <= MAX_PACKET_BYTES && address[2:0] == 0 && !payload_end[64] &&
-        address >= region_low && payload_end <= {1'b0,region_high};
+        length != 0 && length <= MAX_PACKET_BYTES && address[2:0] == 0 && address >= region_low &&
+        (is_segmented ? table_end : payload_end) <= {1'b0,region_high};
     wire basic_format_ok =
-        flags[7:2] == 0 && reserved_word == 0 && (flags[1] || expected_crc == 0);
+        flags[7:3] == 0 && (flags[1] || expected_crc == 0) && (!flags[2] || is_push) &&
+        (is_segmented ? reserved_word != 0 && reserved_word <= MAX_SEGMENTS : reserved_word == 0);
+
+    function automatic logic [64:0] segment_end(
+        input logic [63:0] base,
+        input logic [31:0] count
+    );
+        segment_end = {1'b0, base} + ((65'(count)+65'd7) & ~65'd7);
+    endfunction
+
+    wire [64:0] selected_end = segment_end(segment_address[segment], segment_length[segment]);
+    wire [32:0] next_validated = {1'b0,validated_bytes} + {1'b0,segment_length[segment]};
+    logic intersects_previous;
+    always @* begin
+        intersects_previous = 1'b0;
+        for (integer i = 0; i < MAX_SEGMENTS; i++)
+            if (SEG_W'(i) < segment && {1'b0,segment_address[i]} < selected_end &&
+                {1'b0,segment_address[segment]} < segment_end(segment_address[i],segment_length[i]))
+                intersects_previous = 1'b1;
+    end
+    wire table_overlap = {1'b0,segment_address[segment]} < table_end && {1'b0,address} < selected_end;
+    wire segment_ok = !segment_reserved[segment] && segment_length[segment] != 0 &&
+        segment_address[segment][2:0] == 0 && segment_address[segment] >= region_low &&
+        selected_end <= {1'b0,region_high} &&
+        (!more_segments || segment_length[segment][2:0] == 0) &&
+        !table_overlap && !intersects_previous && next_validated <= {1'b0,length} &&
+        (more_segments || next_validated == {1'b0,length});
 
     logic [63:0] packet_memory [0:WORDS-1];
     wire rd_cmd_ready, rd_valid, rd_done, rd_fault, rd_protocol;
     wire [63:0] rd_data;
     wire [7:0] rd_keep;
     wire wr_cmd_ready, wr_ready, wr_done, wr_fault;
-    wire from_read = (state == DESC_READ || state == PULL_READ) && rd_valid;
+    wire from_read = (state == DESC_READ || state == PAYLOAD_READ) && rd_valid;
+    wire [SEG_W-1:0] table_entry = SEG_W'(table_word >> 1);
     wire from_packet = s_packet_valid && s_packet_ready;
     wire [31:0] digest;
     wire checksum_ok = !flags[1] || digest == expected_crc;
@@ -201,7 +249,9 @@ module host_dma_queues #(
     end
 
     wire retire = !reset && state == COMPLETE_WRITE && wr_done && !wr_fault;
-    dma_queue_table #(.QUEUES(QUEUES), .RING_LOG(RING_LOG)) control (
+    dma_queue_table #(
+        .QUEUES(QUEUES), .RING_LOG(RING_LOG), .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION)
+    ) control (
         .clk, .reset, .cfg_valid, .cfg_ready, .cfg_queue, .cfg_enable,
         .cfg_submission_base, .cfg_completion_base, .cfg_payload_low, .cfg_payload_high,
         .cfg_seed, .cfg_irq_batch, .cfg_irq_delay, .cfg_ack, .cfg_ok,
@@ -226,14 +276,15 @@ module host_dma_queues #(
 
     dma_axi64 #(.MAX_BURST(MAX_BURST)) memory_transport (
         .clk, .reset,
-        .rd_cmd_valid(state == DESC_CMD || state == PULL_CMD), .rd_cmd_ready,
-        .rd_cmd_addr(state == DESC_CMD ? sq_address : address),
-        .rd_cmd_bytes(state == DESC_CMD ? 32'd32 : length),
-        .rd_valid, .rd_ready(state == DESC_READ || state == PULL_READ),
+        .rd_cmd_valid(state == DESC_CMD || state == TABLE_CMD || state == PAYLOAD_READ_CMD), .rd_cmd_ready,
+        .rd_cmd_addr(state == DESC_CMD ? sq_address : (state == TABLE_CMD ? address : transfer_address)),
+        .rd_cmd_bytes(state == DESC_CMD ? 32'd32 :
+            (state == TABLE_CMD ? reserved_word << 4 : transfer_bytes)),
+        .rd_valid, .rd_ready(state == DESC_READ || state == TABLE_READ || state == PAYLOAD_READ),
         .rd_data, .rd_keep, .rd_last(), .rd_done, .rd_fault, .rd_protocol,
         .wr_cmd_valid((state == PUSH_CMD && checksum_ok) || state == COMPLETE_CMD), .wr_cmd_ready,
-        .wr_cmd_addr(state == COMPLETE_CMD ? cq_address : address),
-        .wr_cmd_bytes(state == COMPLETE_CMD ? 32'd32 : length),
+        .wr_cmd_addr(state == COMPLETE_CMD ? cq_address : transfer_address),
+        .wr_cmd_bytes(state == COMPLETE_CMD ? 32'd32 : transfer_bytes),
         .wr_valid(state == PUSH_WRITE || state == COMPLETE_WRITE), .wr_ready,
         .wr_data(state == COMPLETE_WRITE ? completion_data : packet_memory[data_word]),
         .wr_done, .wr_fault,
@@ -249,11 +300,11 @@ module host_dma_queues #(
                          s_packet_keep == keep_for(bytes_left);
     wire capture_timeout = wait_count == WAIT_W'(CAPTURE_TIMEOUT-1);
     dma_crc32 checksum (
-        .clk, .reset, .seed(state == CHECK),
-        .take((state == PULL_READ && from_read) ||
+        .clk, .reset, .seed(state == CHECK || (state == PAYLOAD_READ_CMD && is_push && segment == 0)),
+        .take((state == PAYLOAD_READ && from_read) ||
             (state == PUSH_COLLECT && from_packet && capture_shape)),
-        .data(state == PULL_READ ? rd_data : s_packet_data),
-        .keep(state == PULL_READ ? rd_keep : s_packet_keep),
+        .data(state == PAYLOAD_READ ? rd_data : s_packet_data),
+        .keep(state == PAYLOAD_READ ? rd_keep : s_packet_keep),
         .digest
     );
 
@@ -274,10 +325,18 @@ module host_dma_queues #(
     assign busy = state != IDLE;
 
     always_ff @(posedge clk) begin
-        if (!reset && state == PULL_READ && from_read)
+        if (!reset && state == PAYLOAD_READ && is_pull && from_read)
             packet_memory[data_word] <= rd_data;
         if (!reset && state == PUSH_COLLECT && from_packet && capture_shape)
             packet_memory[data_word] <= mask_invalid(s_packet_data, s_packet_keep);
+        if (!reset && state == TABLE_READ && rd_valid) begin
+            if (table_word[0]) begin
+                segment_length[table_entry] <= rd_data[31:0];
+                segment_reserved[table_entry] <= |rd_data[63:32];
+            end else begin
+                segment_address[table_entry] <= rd_data;
+            end
+        end
     end
 
     // Stage completion status, byte count and CRC before starting the CQ write.
@@ -300,6 +359,10 @@ module host_dma_queues #(
             completion_status <= '0;
             completion_count <= '0;
             completion_crc <= '0;
+            write_digest <= '0;
+            segment <= '0;
+            table_word <= '0;
+            validated_bytes <= '0;
             completion_tick <= '0;
             data_word <= '0;
             bytes_left <= '0;
@@ -354,6 +417,9 @@ module host_dma_queues #(
                 CHECK: begin
                     data_word <= '0;
                     bytes_left <= length;
+                    segment <= '0;
+                    table_word <= '0;
+                    validated_bytes <= '0;
                     if (!basic_format_ok) begin
                         finish(`DMA_BAD_DESC,0,0);
                     end else if (operation == `DMA_FENCE) begin
@@ -361,32 +427,71 @@ module host_dma_queues #(
                             finish(`DMA_BAD_DESC,0,0);
                         else
                             finish(`DMA_OK,0,0);
-                    end else if (operation != `DMA_PULL && operation != `DMA_PUSH) begin
+                    end else if (!is_pull && !is_push && !is_readback) begin
                         finish(`DMA_BAD_OP,0,0);
                     end else if (!transfer_shape_ok) begin
                         finish(`DMA_ADDRESS,0,0);
-                    end else if (operation == `DMA_PULL) begin
-                        state <= PULL_CMD;
-                    end else begin
+                    end else if (is_segmented) begin
+                        state <= TABLE_CMD;
+                    end else if (is_push) begin
                         state <= PUSH_OFFER;
+                    end else begin
+                        state <= PAYLOAD_READ_CMD;
                     end
                 end
-                PULL_CMD: if (rd_cmd_ready)
-                    state <= PULL_READ;
-                PULL_READ: begin
-                    if (from_read)
-                        data_word <= data_word + 1'b1;
+                TABLE_CMD: if (rd_cmd_ready)
+                    state <= TABLE_READ;
+                TABLE_READ: begin
+                    if (rd_valid)
+                        table_word <= table_word + 1'b1;
                     if (rd_done) begin
-                        data_word <= 0;
                         if (rd_protocol) begin
                             fatal_code <= 1;
                             state <= FAILED;
                         end else if (rd_fault) begin
                             finish(`DMA_READ,0,0);
+                        end else begin
+                            state <= TABLE_VALIDATE;
+                        end
+                    end
+                end
+                TABLE_VALIDATE: begin
+                    if (!segment_ok) begin
+                        finish(`DMA_SEGMENT,0,0);
+                    end else if (more_segments) begin
+                        validated_bytes <= next_validated[31:0];
+                        segment <= segment + 1'b1;
+                    end else begin
+                        segment <= '0;
+                        state <= is_push ? PUSH_OFFER : PAYLOAD_READ_CMD;
+                    end
+                end
+                PAYLOAD_READ_CMD: if (rd_cmd_ready)
+                    state <= PAYLOAD_READ;
+                PAYLOAD_READ: begin
+                    if (from_read && is_pull)
+                        data_word <= data_word + 1'b1;
+                    if (rd_done) begin
+                        if (rd_protocol) begin
+                            fatal_code <= 1;
+                            state <= FAILED;
+                        end else if (rd_fault) begin
+                            finish(`DMA_READ,0,0);
+                        end else if (more_segments) begin
+                            segment <= segment + 1'b1;
+                            state <= PAYLOAD_READ_CMD;
+                        end else if (is_push) begin
+                            if (write_digest == digest)
+                                finish(`DMA_OK,length,digest);
+                            else
+                                finish(`DMA_VERIFY,0,digest);
                         end else if (!checksum_ok) begin
                             finish(`DMA_CRC,0,digest);
-                        end else begin
+                        end else if (is_pull) begin
+                            data_word <= 0;
                             state <= PULL_SEND;
+                        end else begin
+                            finish(`DMA_OK,length,digest);
                         end
                     end
                 end
@@ -446,8 +551,17 @@ module host_dma_queues #(
                     if (wr_done) begin
                         if (wr_fault)
                             finish(`DMA_WRITE,0,digest);
-                        else
+                        else if (more_segments) begin
+                            segment <= segment + 1'b1;
+                            state <= PUSH_CMD;
+                        end
+                        else if (flags[2]) begin
+                            write_digest <= digest;
+                            segment <= '0;
+                            state <= PAYLOAD_READ_CMD;
+                        end else begin
                             finish(`DMA_OK,length,digest);
+                        end
                     end
                 end
                 COMPLETE_CMD: if (wr_cmd_ready)
@@ -463,8 +577,8 @@ module host_dma_queues #(
                             if (completed != '1)
                                 completed <= completed + 1'b1;
                             if (completion_status == `DMA_OK) begin
-                                if (operation == `DMA_PULL) pull_bytes <= add_bytes(pull_bytes,length);
-                                if (operation == `DMA_PUSH) push_bytes <= add_bytes(push_bytes,length);
+                                if (is_pull) pull_bytes <= add_bytes(pull_bytes,length);
+                                if (is_push) push_bytes <= add_bytes(push_bytes,length);
                             end else if (rejected != '1) begin
                                 rejected <= rejected + 1'b1;
                             end

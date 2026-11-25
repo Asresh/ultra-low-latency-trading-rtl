@@ -3,6 +3,10 @@
 `define DMA_PULL  8'h01
 `define DMA_PUSH  8'h02
 `define DMA_FENCE 8'h03
+`define DMA_READBACK 8'h04
+`define DMA_GATHER 8'h05
+`define DMA_SCATTER 8'h06
+`define DMA_SEGMENT_DIGEST 8'h07
 `define DMA_OK       8'd0
 `define DMA_BAD_OP   8'd1
 `define DMA_BAD_DESC 8'd2
@@ -12,4 +16,6 @@
 `define DMA_CRC      8'd6
 `define DMA_FRAME    8'd7
 `define DMA_TIMEOUT  8'd8
+`define DMA_VERIFY   8'd9
+`define DMA_SEGMENT  8'd10
 `endif

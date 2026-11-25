@@ -1,6 +1,9 @@
 `timescale 1ns/1ps
 
-module tb_host_dma_queues;
+module tb_host_dma_queues #(
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0,
+    parameter integer TEST_SEGMENTS = 8
+);
     localparam integer MAX_BURST = 8;
     localparam integer RING_LOG = 3;
     localparam integer SLOTS = 1 << RING_LOG;
@@ -61,7 +64,8 @@ module tb_host_dma_queues;
 
     host_dma_queues #(
         .QUEUES(2), .RING_LOG(RING_LOG), .MAX_PACKET_BYTES(MAX_PACKET),
-        .MAX_BURST(MAX_BURST), .CAPTURE_TIMEOUT(48)
+        .MAX_BURST(MAX_BURST), .CAPTURE_TIMEOUT(48),
+        .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION), .MAX_SEGMENTS(TEST_SEGMENTS)
     ) dut (.*);
     tb_dma_memory #(.MAX_BURST(MAX_BURST), .SEED(32'hbcf1ab45)) memory (.*);
 
@@ -80,6 +84,7 @@ module tb_host_dma_queues;
     logic [48:0] held_capture;
     logic [31:0] sink_bits = 32'ha57b1273;
     integer completion_capture = 0, packet_capture = 0;
+    logic integrity_run = 0;
 
     // Open optional completion and packet logs when a capture path is supplied.
     task automatic open_capture;
@@ -164,6 +169,8 @@ module tb_host_dma_queues;
             tx_held = 0;
             cap_held = 0;
         end else begin
+            if (integrity_run && packet_valid)
+                $fatal(1,"An integrity request leaked a packet to the PULL stream");
             if (tx_held && (!packet_valid || {packet_data,packet_keep,packet_first,packet_last,
                                              packet_tag,packet_queue,packet_cookie} !== held_packet))
                 $fatal(1,"TX sidebands changed under backpressure");
@@ -426,12 +433,71 @@ module tb_host_dma_queues;
         end
     end
 
+`include "tb_dma_readback.svh"
+`include "tb_dma_scatter.svh"
+
+    task automatic run_isolated_access;
+        logic [63:0] peer_payload;
+        int prior_addresses;
+        configure(0,1,3,0,1);
+        configure(1,1,7,0,1);
+        @(negedge clk);
+        // The new queue-zero payload interval is locally valid but owns bytes of SQ 1.
+        cfg_valid = 1;
+        cfg_queue = 0;
+        cfg_enable = 1;
+        cfg_submission_base = sq_base(0);
+        cfg_completion_base = cq_base(0);
+        cfg_payload_low = sq_base(1);
+        cfg_payload_high = sq_base(1) + 8;
+        cfg_seed = 16;
+        @(posedge clk);
+        if (!cfg_ready) $fatal(1,"isolated configuration was not sampled");
+        @(negedge clk);
+        cfg_valid = 0;
+        if (!cfg_ack || cfg_ok) $fatal(1,"top-level isolation parameter allowed peer SQ ownership");
+
+        peer_payload = aperture_start(1);
+        initialize_payload(peer_payload,13,721);
+        prior_addresses = memory.ar_count;
+        submit(0,4,0,16'h0311,13,peer_payload,64'h177,0,0);
+        expect_completion(0,3,4,16'h0311,0,64'h177,0,1);
+        if (memory.ar_count != prior_addresses + 1)
+            $fatal(1,"peer payload request entered the memory data path");
+        submit(1,4,0,16'h0312,13,peer_payload,64'h188,0,0);
+        expect_completion(1,0,4,16'h0312,13,64'h188,reference_crc(721,13),1);
+        if (memory.ar_count != prior_addresses + 3)
+            $fatal(1,"peer owner could not access its own payload bytes");
+        $display("PASS DMA isolation integration: rejects peer SQ claim and checks address ownership on READBACK");
+    endtask
+
     initial begin : run
         logic [31:0] crc_a, crc_b;
         logic [31:0] saved_sq, saved_cq;
         integer before_read, before_write;
         open_capture();
+        integrity_run = $test$plusargs("readback") || $test$plusargs("isolation-access");
         reset_core();
+        if ($test$plusargs("segment-capacity")) begin
+            run_segment_capacity();
+            $finish;
+        end
+        if ($test$plusargs("scatter")) begin
+            run_scatter();
+            if (packet_capture) $fclose(packet_capture);
+            if (completion_capture) $fclose(completion_capture);
+            $finish;
+        end
+        if ($test$plusargs("isolation-access")) begin
+            run_isolated_access();
+            $finish;
+        end
+        if (integrity_run) begin
+            run_readback();
+            if (packet_capture) $fclose(packet_capture);
+            if (completion_capture) $fclose(completion_capture);
+            $finish;
+        end
         configure(1,1,0,1,0);
         configure(0,1,32'hfffffffd,0,1);
         configure(1,1,32'd25,0,1);

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 
-from drop_copy_model import COUNTERS, WORD32, Event, Inputs, Key, Lane, Oracle, Report, Status
+from drop_copy_model import COUNTERS, RESET_TICK, WORD32, Event, Inputs, Key, Lane, Oracle, Report, Status
 
 
 BAD_NAMESPACE = 13
@@ -58,12 +58,12 @@ def pack_low_first(values, width: int) -> int:
 
 
 class PartitionModel:
-    def __init__(self, count: int, sets: int, wait: int = 24, history: int = 40):
+    def __init__(self, count: int, sets: int, wait: int = 24, history: int = 40, reset_tick: int = RESET_TICK):
         if count <= 0:
             raise ValueError("namespace count must be positive")
         self.count = count
         self.sets = sets
-        self.ledgers = [Oracle(sets, wait, history) for _ in range(count)]
+        self.ledgers = [Oracle(sets, wait, history, reset_tick) for _ in range(count)]
         self.clear_merge()
 
     def clear_merge(self):

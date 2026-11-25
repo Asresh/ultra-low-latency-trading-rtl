@@ -110,3 +110,59 @@ partition-waveform: $(BUILD)/partitions-3.vvp
 		--signal 'tb_drop_copy_partitions.s_epoch_valid=Epoch request valid' \
 		--signal 'tb_drop_copy_partitions.namespace_incidents=Incident bitmap' \
 		--signal 'tb_drop_copy_partitions.active_epochs=Packed epochs'
+
+.PHONY: test-investigator lint-investigator synth-investigator formal-investigator investigation-waveform
+
+AUDIT_TOP := drop_copy_investigator
+AUDIT_TB := tb_drop_copy_investigator
+AUDIT_TESTS := test-investigator-1 test-investigator-3 test-investigator-5
+AUDIT_CYCLES ?= 9600
+
+.PHONY: $(AUDIT_TESTS)
+test: test-investigator
+lint: lint-investigator
+synth: synth-investigator
+formal: formal-investigator
+waveform: investigation-waveform
+
+test-investigator: $(AUDIT_TESTS)
+
+$(AUDIT_TESTS): test-investigator-%: $(BUILD)/investigator-%.vvp
+	$(PYTHON) -B check_investigator.py generate $(BUILD)/investigator-$* \
+		--namespaces $* --sets $(PARTITION_SETS_$*) --seed $* --cycles $(AUDIT_CYCLES)
+	$(VVP) $< +vectors=$(BUILD)/investigator-$*
+	$(PYTHON) -B check_investigator.py check $(BUILD)/investigator-$* --namespaces $* --sets $(PARTITION_SETS_$*)
+
+$(BUILD)/investigator-%.vvp: $(RTL) $(HEADERS) $(AUDIT_TB).sv rtl.f | $(BUILD)
+	$(IVERILOG) -g2012 -I. -s $(AUDIT_TB) -P $(AUDIT_TB).NAMESPACES=$* \
+		-P $(AUDIT_TB).SETS=$(PARTITION_SETS_$*) -o $@ -f rtl.f $(AUDIT_TB).sv
+
+lint-investigator:
+	$(VERILATOR) --lint-only -Wall --top-module $(AUDIT_TOP) -f rtl.f
+	$(VERILATOR) --lint-only -Wall --top-module $(AUDIT_TOP) -GNAMESPACES=1 -GSETS=1 -f rtl.f
+	$(VERILATOR) --lint-only -Wall --top-module drop_copy_audit_frame -f rtl.f
+
+synth-investigator: | $(BUILD)
+	$(YOSYS) -Q -q -m slang -l $(BUILD)/investigator-synth.log -p 'read_slang -I. --top $(AUDIT_TOP) $(RTL); synth -top $(AUDIT_TOP) -noabc; check -assert; stat'
+	$(YOSYS) -Q -q -m slang -l $(BUILD)/audit-frame-synth.log -p 'read_slang --top drop_copy_audit_frame drop_copy_audit_frame.sv; synth -top drop_copy_audit_frame -noabc; check -assert; stat'
+
+formal-investigator: | $(BUILD)
+	$(YOSYS) -Q -q -m slang -l $(BUILD)/investigator-formal.log -p 'read_slang --formal -D FORMAL -I. --top $(AUDIT_TOP) -G NAMESPACES=1 -G SETS=1 -G WAIT_CYCLES=3 -G HISTORY_CYCLES=5 $(RTL); prep; memory_map; flatten; async2sync; chformal -lower; opt; sat -seq 9 -set-at 1 rst 1 -prove-asserts -verify'
+	$(YOSYS) -Q -q -m slang -l $(BUILD)/audit-frame-formal.log -p 'read_slang --formal -D FORMAL --top drop_copy_audit_frame -G RECORD_W=39 drop_copy_audit_frame.sv; prep; memory_map; flatten; async2sync; chformal -lower; opt; sat -seq 12 -set-at 1 rst 1 -prove-asserts -verify'
+
+investigation-waveform: $(BUILD)/investigator-3.vvp
+	$(PYTHON) -B check_investigator.py generate $(BUILD)/investigation-wave --cycles 0
+	$(VVP) $< +vectors=$(BUILD)/investigation-wave +waves=$(BUILD)/investigation-wave/tape.vcd
+	$(PYTHON) -B check_investigator.py check $(BUILD)/investigation-wave
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/investigation-wave/tape.vcd investigation-waveform.svg \
+		--start 8 --end 630 --title 'Recorder backpressure preserves a missing-copy and late-mate timeline' \
+		--signal 'tb_drop_copy_investigator.s_primary_valid=Primary offer' \
+		--signal 'tb_drop_copy_investigator.audit_allow=Recorder enabled' \
+		--signal 'tb_drop_copy_investigator.audit_ready=Recorder ready' \
+		--signal 'tb_drop_copy_investigator.audit_index=Recorded index' \
+		--signal 'tb_drop_copy_investigator.m_valid=Diagnostic valid' \
+		--signal 'tb_drop_copy_investigator.m_status=Diagnostic code' \
+		--signal 'tb_drop_copy_investigator.s_copy_valid=Late copy offered' \
+		--signal 'tb_drop_copy_investigator.s_copy_ready=Late copy ready' \
+		--signal 'tb_drop_copy_investigator.m_record_index=Diagnostic record' \
+		--signal 'tb_drop_copy_investigator.namespace_incidents=Incident bitmap'

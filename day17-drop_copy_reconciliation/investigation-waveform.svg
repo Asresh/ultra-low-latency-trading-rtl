@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="598" viewBox="0 0 1160 598" role="img" aria-labelledby="wave-title">
+<title id="wave-title">Recorder backpressure preserves a missing-copy and late-mate timeline</title>
+<style>
+text{fill:#12253b;font:13px ui-monospace,Menlo,Consolas,monospace}
+.title{font:600 24px system-ui,sans-serif}
+.sub,.axis{fill:#42566b}
+.ruler{stroke:#d2dfe8;stroke-width:1}
+.trace,.edge{fill:none;stroke:#06756f;stroke-width:2.3}
+.edge{opacity:.7}
+.unknown{fill:none;stroke:#987542;stroke-width:2;stroke-dasharray:4 3}
+.bus{fill:#e1f3ef;stroke:#06756f;stroke-width:1.5}
+.gap{fill:#fff2d6;stroke:#987542}
+.value{font-size:12px}
+</style>
+<rect width="100%" height="100%" rx="14" fill="#f5f9fc"/>
+<text x="28.00" y="38.00" class="title" text-anchor="start">Recorder backpressure preserves a missing-copy and late-mate timeline</text>
+<text x="28.00" y="64.00" class="sub" text-anchor="start">RTL simulation · bus values in hex · X/Z shown in amber</text>
+<rect x="22" y="80" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="105.00" class="" text-anchor="start">Primary offer</text>
+<text x="32.00" y="148.00" class="" text-anchor="start">Recorder enabled</text>
+<rect x="22" y="166" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="191.00" class="" text-anchor="start">Recorder ready</text>
+<text x="32.00" y="234.00" class="" text-anchor="start">Recorded index</text>
+<rect x="22" y="252" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="277.00" class="" text-anchor="start">Diagnostic valid</text>
+<text x="32.00" y="320.00" class="" text-anchor="start">Diagnostic code</text>
+<rect x="22" y="338" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="363.00" class="" text-anchor="start">Late copy offered</text>
+<text x="32.00" y="406.00" class="" text-anchor="start">Late copy ready</text>
+<rect x="22" y="424" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="449.00" class="" text-anchor="start">Diagnostic record</text>
+<text x="32.00" y="492.00" class="" text-anchor="start">Incident bitmap</text>
+<path class="ruler" d="M218.00 80V512"/>
+<text x="218.00" y="536.00" class="axis" text-anchor="middle">8</text>
+<path class="ruler" d="M352.45 80V512"/>
+<text x="352.45" y="536.00" class="axis" text-anchor="middle">100</text>
+<path class="ruler" d="M498.59 80V512"/>
+<text x="498.59" y="536.00" class="axis" text-anchor="middle">200</text>
+<path class="ruler" d="M644.73 80V512"/>
+<text x="644.73" y="536.00" class="axis" text-anchor="middle">300</text>
+<path class="ruler" d="M790.87 80V512"/>
+<text x="790.87" y="536.00" class="axis" text-anchor="middle">400</text>
+<path class="ruler" d="M937.02 80V512"/>
+<text x="937.02" y="536.00" class="axis" text-anchor="middle">500</text>
+<path class="ruler" d="M1127.00 80V512"/>
+<text x="1127.00" y="536.00" class="axis" text-anchor="middle">630</text>
+<path class="trace" d="M218.00 89.00H223.85"/>
+<path class="edge" d="M223.85 89.00V111.00"/>
+<path class="trace" d="M223.85 111.00H1127.00"/>
+<path class="trace" d="M218.00 132.00H223.85"/>
+<path class="edge" d="M223.85 132.00V154.00"/>
+<path class="trace" d="M223.85 154.00H393.37"/>
+<path class="edge" d="M393.37 154.00V132.00"/>
+<path class="trace" d="M393.37 132.00H1127.00"/>
+<path class="trace" d="M218.00 175.00H223.85"/>
+<path class="edge" d="M223.85 175.00V197.00"/>
+<path class="trace" d="M223.85 197.00H393.37"/>
+<path class="edge" d="M393.37 197.00V175.00"/>
+<path class="trace" d="M393.37 175.00H396.29"/>
+<path class="edge" d="M396.29 175.00V197.00"/>
+<path class="trace" d="M396.29 197.00H595.05"/>
+<path class="edge" d="M595.05 197.00V175.00"/>
+<path class="trace" d="M595.05 175.00H600.89"/>
+<path class="edge" d="M600.89 175.00V197.00"/>
+<path class="trace" d="M600.89 197.00H799.64"/>
+<path class="edge" d="M799.64 197.00V175.00"/>
+<path class="trace" d="M799.64 175.00H805.49"/>
+<path class="edge" d="M805.49 175.00V197.00"/>
+<path class="trace" d="M805.49 197.00H1004.24"/>
+<path class="edge" d="M1004.24 197.00V175.00"/>
+<path class="trace" d="M1004.24 175.00H1010.09"/>
+<path class="edge" d="M1010.09 175.00V197.00"/>
+<path class="trace" d="M1010.09 197.00H1127.00"/>
+<path class="bus" d="M218.00 229.00L218.97 217.00H219.95L220.92 229.00L219.95 241.00H218.97Z"/>
+<path class="bus" d="M220.92 229.00L225.92 217.00H391.29L396.29 229.00L391.29 241.00H225.92Z"/>
+<text x="308.61" y="233.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M396.29 229.00L401.29 217.00H595.89L600.89 229.00L595.89 241.00H401.29Z"/>
+<text x="498.59" y="233.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M600.89 229.00L605.89 217.00H800.49L805.49 229.00L800.49 241.00H605.89Z"/>
+<text x="703.19" y="233.00" class="value" text-anchor="middle">0x3</text>
+<path class="bus" d="M805.49 229.00L810.49 217.00H1005.09L1010.09 229.00L1005.09 241.00H810.49Z"/>
+<text x="907.79" y="233.00" class="value" text-anchor="middle">0x4</text>
+<path class="bus" d="M1010.09 229.00L1015.09 217.00H1122.00L1127.00 229.00L1122.00 241.00H1015.09Z"/>
+<text x="1068.54" y="233.00" class="value" text-anchor="middle">0x5</text>
+<path class="trace" d="M218.00 283.00H396.29"/>
+<path class="edge" d="M396.29 283.00V261.00"/>
+<path class="trace" d="M396.29 261.00H402.14"/>
+<path class="edge" d="M402.14 261.00V283.00"/>
+<path class="trace" d="M402.14 283.00H600.89"/>
+<path class="edge" d="M600.89 283.00V261.00"/>
+<path class="trace" d="M600.89 261.00H606.74"/>
+<path class="edge" d="M606.74 261.00V283.00"/>
+<path class="trace" d="M606.74 283.00H1010.09"/>
+<path class="edge" d="M1010.09 283.00V261.00"/>
+<path class="trace" d="M1010.09 261.00H1015.93"/>
+<path class="edge" d="M1015.93 261.00V283.00"/>
+<path class="trace" d="M1015.93 283.00H1127.00"/>
+<path class="bus" d="M218.00 315.00L223.00 303.00H595.89L600.89 315.00L595.89 327.00H223.00Z"/>
+<text x="409.45" y="319.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M600.89 315.00L605.89 303.00H1005.09L1010.09 315.00L1005.09 327.00H605.89Z"/>
+<text x="805.49" y="319.00" class="value" text-anchor="middle">0x5</text>
+<path class="bus" d="M1010.09 315.00L1015.09 303.00H1122.00L1127.00 315.00L1122.00 327.00H1015.09Z"/>
+<text x="1068.54" y="319.00" class="value" text-anchor="middle">0x7</text>
+<path class="trace" d="M218.00 369.00H603.81"/>
+<path class="edge" d="M603.81 369.00V347.00"/>
+<path class="trace" d="M603.81 347.00H808.41"/>
+<path class="edge" d="M808.41 347.00V369.00"/>
+<path class="trace" d="M808.41 369.00H1127.00"/>
+<path class="trace" d="M218.00 412.00H799.64"/>
+<path class="edge" d="M799.64 412.00V390.00"/>
+<path class="trace" d="M799.64 390.00H805.49"/>
+<path class="edge" d="M805.49 390.00V412.00"/>
+<path class="trace" d="M805.49 412.00H1127.00"/>
+<path class="bus" d="M218.00 444.00L223.00 432.00H391.29L396.29 444.00L391.29 456.00H223.00Z"/>
+<text x="307.15" y="448.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M396.29 444.00L401.29 432.00H595.89L600.89 444.00L595.89 456.00H401.29Z"/>
+<text x="498.59" y="448.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M600.89 444.00L605.89 432.00H1005.09L1010.09 444.00L1005.09 456.00H605.89Z"/>
+<text x="805.49" y="448.00" class="value" text-anchor="middle">0x3</text>
+<path class="bus" d="M1010.09 444.00L1015.09 432.00H1122.00L1127.00 444.00L1122.00 456.00H1015.09Z"/>
+<text x="1068.54" y="448.00" class="value" text-anchor="middle">0x5</text>
+<path class="bus" d="M218.00 487.00L223.00 475.00H391.29L396.29 487.00L391.29 499.00H223.00Z"/>
+<text x="307.15" y="491.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M396.29 487.00L401.29 475.00H1122.00L1127.00 487.00L1122.00 499.00H401.29Z"/>
+<text x="761.65" y="491.00" class="value" text-anchor="middle">0x1</text>
+<text x="1127.00" y="562.00" class="axis" text-anchor="end">Time (ns)</text>
+</svg>

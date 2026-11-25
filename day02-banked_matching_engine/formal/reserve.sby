@@ -1,0 +1,24 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode bmc
+safety: depth 22
+cover: mode cover
+cover: depth 16
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -sv reserve_order_book.sv formal_reserve_book.sv
+prep -top formal_reserve_book
+memory_map
+opt
+
+[files]
+../reserve_order_book.sv
+../reserve_codes.svh
+reserve_properties.svh
+formal_reserve_book.sv

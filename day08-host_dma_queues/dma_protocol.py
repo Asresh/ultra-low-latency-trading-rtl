@@ -172,10 +172,19 @@ class QueueConfig:
             raise ValueError("exclusive DMA aperture bound must fit in 64 bits")
         if self.aperture.start%LANES or self.aperture.stop%LANES:
             raise ValueError("aperture endpoints must be bus-beat aligned")
-        regions = (self.sq.region,self.cq.region,self.aperture)
+        regions = self.regions
         for i, a in enumerate(regions):
             if any(a.overlaps(b) for b in regions[i+1:]):
                 raise ValueError("SQ, CQ and data aperture must not overlap within a queue")
+
+    @property
+    def regions(self):
+        """Return the queue-owned half-open regions in ABI order."""
+        return self.sq.region, self.cq.region, self.aperture
+
+    def overlaps(self, other):
+        """Check whether any byte is claimed by both queues."""
+        return any(first.overlaps(second) for first in self.regions for second in other.regions)
 
 
 @dataclass(frozen=True)

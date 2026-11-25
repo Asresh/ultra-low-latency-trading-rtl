@@ -1,6 +1,8 @@
 `timescale 1ns/1ps
 
-module tb_host_dma_queues;
+module tb_host_dma_queues #(
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0
+);
     localparam integer MAX_BURST = 8;
     localparam integer RING_LOG = 3;
     localparam integer SLOTS = 1 << RING_LOG;
@@ -61,7 +63,8 @@ module tb_host_dma_queues;
 
     host_dma_queues #(
         .QUEUES(2), .RING_LOG(RING_LOG), .MAX_PACKET_BYTES(MAX_PACKET),
-        .MAX_BURST(MAX_BURST), .CAPTURE_TIMEOUT(48)
+        .MAX_BURST(MAX_BURST), .CAPTURE_TIMEOUT(48),
+        .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION)
     ) dut (.*);
     tb_dma_memory #(.MAX_BURST(MAX_BURST), .SEED(32'hbcf1ab45)) memory (.*);
 
@@ -431,13 +434,52 @@ module tb_host_dma_queues;
 
 `include "tb_dma_readback.svh"
 
+    task automatic run_isolated_access;
+        logic [63:0] peer_payload;
+        int prior_addresses;
+        configure(0,1,3,0,1);
+        configure(1,1,7,0,1);
+        @(negedge clk);
+        // The new queue-zero payload interval is locally valid but owns bytes of SQ 1.
+        cfg_valid = 1;
+        cfg_queue = 0;
+        cfg_enable = 1;
+        cfg_submission_base = sq_base(0);
+        cfg_completion_base = cq_base(0);
+        cfg_payload_low = sq_base(1);
+        cfg_payload_high = sq_base(1) + 8;
+        cfg_seed = 16;
+        @(posedge clk);
+        if (!cfg_ready) $fatal(1,"isolated configuration was not sampled");
+        @(negedge clk);
+        cfg_valid = 0;
+        if (!cfg_ack || cfg_ok) $fatal(1,"top-level isolation parameter allowed peer SQ ownership");
+
+        peer_payload = aperture_start(1);
+        initialize_payload(peer_payload,13,721);
+        prior_addresses = memory.ar_count;
+        submit(0,4,0,16'h0311,13,peer_payload,64'h177,0,0);
+        expect_completion(0,3,4,16'h0311,0,64'h177,0,1);
+        if (memory.ar_count != prior_addresses + 1)
+            $fatal(1,"peer payload request entered the memory data path");
+        submit(1,4,0,16'h0312,13,peer_payload,64'h188,0,0);
+        expect_completion(1,0,4,16'h0312,13,64'h188,reference_crc(721,13),1);
+        if (memory.ar_count != prior_addresses + 3)
+            $fatal(1,"peer owner could not access its own payload bytes");
+        $display("PASS DMA isolation integration: rejects peer SQ claim and checks address ownership on READBACK");
+    endtask
+
     initial begin : run
         logic [31:0] crc_a, crc_b;
         logic [31:0] saved_sq, saved_cq;
         integer before_read, before_write;
         open_capture();
-        integrity_run = $test$plusargs("readback");
+        integrity_run = $test$plusargs("readback") || $test$plusargs("isolation-access");
         reset_core();
+        if ($test$plusargs("isolation-access")) begin
+            run_isolated_access();
+            $finish;
+        end
         if (integrity_run) begin
             run_readback();
             if (packet_capture) $fclose(packet_capture);

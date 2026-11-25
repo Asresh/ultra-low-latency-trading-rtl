@@ -320,12 +320,13 @@ class Pending:
 
 
 class Engine:
-    def __init__(self,fabric=None,*,capture_timeout=128,queues=2):
+    def __init__(self,fabric=None,*,capture_timeout=128,queues=2,isolate_queues=False):
         """Initialize independent host queues, interrupt state and descriptor scheduling."""
         if capture_timeout <= 0 or queues < 1:
             raise ValueError("capture timeout and queue count must be positive")
         self.fabric = fabric if fabric is not None else Fabric()
         self.capture_timeout = capture_timeout
+        self.isolate_queues = isolate_queues
         self.queues = [None]*queues
         self.cursor = 0
         self.pending = None
@@ -344,6 +345,11 @@ class Engine:
             return False
         old = self.queues[index]
         if old and (old.submission_count or old.completion_count):
+            return False
+        if self.isolate_queues and config is not None and any(
+            peer is not None and peer_index != index and config.overlaps(peer.config)
+            for peer_index,peer in enumerate(self.queues)
+        ):
             return False
         self.queues[index] = None if config is None else Queue.fresh(config,seed,irq_batch,irq_delay)
         return True

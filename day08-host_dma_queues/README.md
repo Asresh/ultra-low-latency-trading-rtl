@@ -4,7 +4,7 @@ A bidirectional DMA core for moving small packets, control messages and captures
 
 The default core has two queues of eight entries, a 512-byte packet buffer, 64-bit memory and stream interfaces, and a 16-beat memory burst cap. The design is useful for studying where descriptor fetching, integrity checks, queue credits and write acknowledgements add latency to a host/FPGA boundary.
 
-The [memory integrity path](#memory-readback-and-verified-capture) adds digest-only READBACK and optional PUSH readback verification for host-buffer captures.
+The [memory integrity path](#memory-readback-and-verified-capture) adds digest-only READBACK and optional PUSH readback verification for host-buffer captures. The [queue-isolation mode](#optional-queue-address-isolation) prevents overlapping memory claims across enabled queues.
 
 ```mermaid
 flowchart LR
@@ -30,7 +30,7 @@ flowchart LR
 ## Queue ownership and ordering
 
 - Configure a queue while the engine is idle. An enabled queue can be replaced or disabled once both rings are empty. A successful configuration loads all four cursors with the same 32-bit seed and clears its interrupt state.
-- SQ and CQ bases are 32-byte aligned. The payload interval is nonempty, 8-byte aligned and half-open. The three regions in a single queue must be disjoint. The host allocator owns isolation across queues and physical memory mappings.
+- SQ and CQ bases are 32-byte aligned. The payload interval is nonempty, 8-byte aligned and half-open. The three regions in a single queue must be disjoint. Cross-queue isolation can be enforced by the core. The host allocator owns the physical memory mappings.
 - The host publishes an absolute SQ tail and CQ head in one doorbell. Both updates are accepted together when they fit the currently observed credits. SQ free space is ring depth minus the unsigned `SQ tail − SQ head` distance. The host can release at most `CQ tail − CQ head` records. Cursor arithmetic wraps at 32 bits, while memory addresses use only the low `RING_LOG` bits.
 - A queue is eligible when enabled, its SQ has work, and its CQ has credit. The scheduler rotates after each grant. With three continuously eligible queues and no external stalls, two other grants can precede service. A full CQ only excludes its own queue from selection. An active descriptor can still block all queues on memory or packet backpressure.
 - Finish posting descriptor and payload bytes before the submission doorbell. Read the committed CQ tail before consuming records and release those CQ slots afterward. The adapter and host driver provide the required memory barriers and visibility across their actual PCIe or coherent interconnect. [Linux DMA mapping guide](https://docs.kernel.org/core-api/dma-api-howto.html)
@@ -123,6 +123,14 @@ sequenceDiagram
 
 For tag `0x0100`, the final payload response transfers at 1225 ns, the verification read starts at 1255 ns and its last beat transfers at 1635 ns. The completion B transfers at 1825 ns. The queue tail changes from `0xfffffffd` to `0xfffffffe` and IRQ asserts at 1835 ns. Run `make waveform-readback` to rerun the checked fixture and rebuild the figure.
 
+## Optional queue address isolation
+
+Instantiate `host_dma_queues` with `ENFORCE_QUEUE_ISOLATION=1` to protect separately provisioned FPGA DMA queues from overlapping address claims. An example is giving one strategy queue ownership of its quote updates while a capture queue records independent data in another host region. The guard rejects a proposed submission ring, completion ring or payload interval if any byte intersects one of those three regions in another enabled queue. Adjacent half-open intervals may share an endpoint. A configuration rejected for overlap asserts `cfg_ack` with `cfg_ok=0` and preserves the previous layout, ring cursors and interrupt state.
+
+An enabled queue keeps its entire layout while its SQ or CQ holds entries. Once both rings are empty and the worker is idle, changing or disabling the queue releases its previous claims. Replacing the same queue may overlap its own previous layout. Detaching a queue or changing mappings still requires the host to coordinate its software, adapter and DMA memory lifetime. The hardware guard compares addresses in the configured AXI address space and depends on that space's mapping for isolation. Its default setting is zero to preserve deployments with intentionally shared payload regions.
+
+`make test-isolation` checks all nine region pairs in hardware, legal adjacency, ownership retention with outstanding ring entries and reassignment after a successful disable. A top-level fixture rejects a payload claim on another queue's SQ, rejects a cross-queue READBACK before payload AR, and reads the same bytes successfully through their owner. The full memory integrity fixture also runs with isolation enabled.
+
 ## Interface and implementation
 
 | Interface | Contract |
@@ -154,8 +162,8 @@ make synth
 | Queue and interrupt units | 1,073 retired entries across three queues, concurrent retirement and doorbell updates, modulo wrap, full CQ and invalid configuration. Interrupt tests cover batch, timer, saturation and coincident acknowledge/retire. |
 | CRC | 4,845 accepted beats, 19,348 selected bytes, every keep mask, the standard `123456789` check and a separate bit-oriented oracle. |
 | Memory integrity | An RTL run checks 29 completions, nine error responses, 677 verified PUSH bytes, every partial final lane count, and the 512-byte maximum. It covers a corrupted readback, held responses, failed payload and verification responses, and fail-stop after malformed verification RLAST. An independent Python audit checks all CQ payload fields and confirms zero stream packets. |
-| Host reference | 44 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all ten statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
-| Structural checks | Strict Verilator lint passed. Default Yosys synthesis produced 32,057 generic cells and zero structural findings. |
+| Host reference | 50 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all ten statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
+| Structural checks | Strict Verilator lint and zero Yosys structural findings in both modes. Default generic synthesis produced 32,057 cells with shared layouts allowed and 44,500 cells with address isolation enabled. |
 
 The regression writes `build/completions.hex` and `build/packets.txt` from the RTL. Run `python3 audit_directed_capture.py build` to compare those files again. For the host model, `python3 dma_workload.py --seed 8088 --requests 96 --depth 8 --output build/ledger.json` produces a separate expected workload. `dma_audit.py LEDGER COMPLETIONS PACKETS` accepts one 32-byte completion per hex row and one `queue tag cookie data keep first last` record per accepted stream beat. Completion order is compared per queue by default. An optional strict mode also compares the global schedule.
 

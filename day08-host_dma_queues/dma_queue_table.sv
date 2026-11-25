@@ -4,6 +4,7 @@
 module dma_queue_table #(
     parameter integer QUEUES = 2,
     parameter integer RING_LOG = 3,
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0,
     localparam integer Q_W = QUEUES > 1 ? $clog2(QUEUES) : 1,
     localparam integer DEPTH = 1 << RING_LOG
 ) (
@@ -62,8 +63,9 @@ module dma_queue_table #(
     logic [31:0] irq_delay [0:QUEUES-1];
     wire [7:0] irq_backlogs [0:QUEUES-1];
 
-    wire [64:0] submission_end = {1'b0, cfg_submission_base} + (65'(DEPTH) << 5);
-    wire [64:0] completion_end = {1'b0, cfg_completion_base} + (65'(DEPTH) << 5);
+    localparam logic [64:0] RING_BYTES = 65'(DEPTH) << 5;
+    wire [64:0] submission_end = {1'b0, cfg_submission_base} + RING_BYTES;
+    wire [64:0] completion_end = {1'b0, cfg_completion_base} + RING_BYTES;
     wire [31:0] submit_advance = host_submit_tail - sq_tail[host_queue];
     wire [31:0] complete_advance = host_complete_head - cq_head[host_queue];
     wire [31:0] sq_pending = sq_tail[host_queue] - sq_head[host_queue];
@@ -80,9 +82,45 @@ module dma_queue_table #(
          {1'b0, cfg_payload_high} <= {1'b0, cfg_submission_base}) &&
         (completion_end <= {1'b0, cfg_payload_low} ||
          {1'b0, cfg_payload_high} <= {1'b0, cfg_completion_base});
+
+    function automatic logic overlaps(
+        input logic [64:0] a_start, a_end, b_start, b_end
+    );
+        overlaps = a_start < b_end && b_start < a_end;
+    endfunction
+
+    wire isolated;
+    if (ENFORCE_QUEUE_ISOLATION && QUEUES > 1) begin : g_isolation
+        wire [QUEUES-1:0] conflicts;
+        for (genvar q = 0; q < QUEUES; q++) begin : peer
+            wire [64:0] starts [0:2], ends [0:2];
+            wire [8:0] intersections;
+            assign starts[0] = {1'b0, submission_base[q]};
+            assign starts[1] = {1'b0, completion_base[q]};
+            assign starts[2] = {1'b0, payload_low[q]};
+            assign ends[0] = starts[0] + RING_BYTES;
+            assign ends[1] = starts[1] + RING_BYTES;
+            assign ends[2] = {1'b0, payload_high[q]};
+            for (genvar region = 0; region < 3; region++) begin : compare_region
+                assign intersections[3*region] = overlaps(
+                    {1'b0, cfg_submission_base}, submission_end, starts[region], ends[region]
+                );
+                assign intersections[3*region+1] = overlaps(
+                    {1'b0, cfg_completion_base}, completion_end, starts[region], ends[region]
+                );
+                assign intersections[3*region+2] = overlaps(
+                    {1'b0, cfg_payload_low}, {1'b0, cfg_payload_high}, starts[region], ends[region]
+                );
+            end
+            assign conflicts[q] = enabled[q] && cfg_queue != Q_W'(q) && (|intersections);
+        end
+        assign isolated = !(|conflicts);
+    end else begin : g_legacy_layout
+        assign isolated = 1'b1;
+    end
     wire configure = cfg_valid && cfg_ready &&
                      (({1'b0, cfg_queue} < (Q_W+1)'(QUEUES)) && can_replace &&
-                      (!cfg_enable || layout_ok));
+                      (!cfg_enable || (layout_ok && isolated)));
     wire host_update = host_valid && host_ready &&
                        {1'b0, host_queue} < (Q_W+1)'(QUEUES) && enabled[host_queue] &&
                        sq_pending <= DEPTH && submit_advance <= DEPTH - sq_pending &&

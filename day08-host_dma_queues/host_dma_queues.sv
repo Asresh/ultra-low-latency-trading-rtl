@@ -8,6 +8,7 @@ module host_dma_queues #(
     parameter integer MAX_PACKET_BYTES = 512,
     parameter integer MAX_BURST = 16,
     parameter integer CAPTURE_TIMEOUT = 128,
+    parameter bit ENFORCE_QUEUE_ISOLATION = 1'b0,
     localparam integer Q_W = QUEUES > 1 ? $clog2(QUEUES) : 1,
     localparam integer WORDS = (MAX_PACKET_BYTES + 7) / 8,
     localparam integer WORD_W = (WORDS > 1) ? $clog2(WORDS) : 1,
@@ -203,7 +204,9 @@ module host_dma_queues #(
     end
 
     wire retire = !reset && state == COMPLETE_WRITE && wr_done && !wr_fault;
-    dma_queue_table #(.QUEUES(QUEUES), .RING_LOG(RING_LOG)) control (
+    dma_queue_table #(
+        .QUEUES(QUEUES), .RING_LOG(RING_LOG), .ENFORCE_QUEUE_ISOLATION(ENFORCE_QUEUE_ISOLATION)
+    ) control (
         .clk, .reset, .cfg_valid, .cfg_ready, .cfg_queue, .cfg_enable,
         .cfg_submission_base, .cfg_completion_base, .cfg_payload_low, .cfg_payload_high,
         .cfg_seed, .cfg_irq_batch, .cfg_irq_delay, .cfg_ack, .cfg_ok,

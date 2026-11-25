@@ -8,7 +8,9 @@ Use the optional [integrity-checking gearbox](docs/integrity.md) for captured
 or transported frames with a trusted byte count and CRC descriptor. An
 [asynchronous companion](docs/async.md) moves packets and diagnostics
 between independent clocks and acknowledges an ordered drain barrier
-after older output frames retire.
+after older output frames retire. The [packet splice path](docs/splice.md)
+normalizes unaligned first beats and strips, prefixes, patches or
+seals a packet as it changes width.
 
 ```mermaid
 flowchart LR

@@ -1,0 +1,23 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 14
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top spliced_packet_gearbox -D FORMAL_SPLICE -G IN_BYTES=2 -G OUT_BYTES=3 -G MAX_FRAME=4 -G MAX_PREFIX=2 spliced_packet_gearbox.sv
+prep -top spliced_packet_gearbox
+memory_map
+setundef -undriven -anyseq
+opt
+check -assert
+
+[files]
+../spliced_packet_gearbox.sv

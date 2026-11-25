@@ -136,6 +136,10 @@ At small test geometry, the Icarus benchmark injected identical 41-byte one-Dele
 
 For the measured path the final-to-event stages were three clocks for header and block validation, seven for descriptor and RAM replay through bank acceptance, one for handing off the reorder head, three for the ITCH input beats and one for event transfer. Longer packets require two validation clocks per block after the header. Ingress must wait when both banks are busy. Sustained throughput depends on block length and count, arbitration occupancy, recovery, and downstream stalls. The isolated burst test does not establish a sustained Ethernet line rate.
 
+## Guarded retransmission return
+
+The optional recovery transport guard qualifies entire reply datagrams against a slot, epoch, live request and coverage map before they can rejoin the receiver. It includes a request dispatcher, independent audit output, and packet-level arbitration with live lane B. The closed-loop test captures real requests, retrieves the original wire bytes from the archive, injects faults, and checks repaired events. [Recovery guard integration and waveform](docs/recovery-guard.md)
+
 ## Verification and replay
 
 [`scenarios.py`](scenarios.py) builds binary packets and injections. [`wire_codec.py`](wire_codec.py) independently parses and normalizes reference records. [`tb_redundant_market_data.sv`](tb_redundant_market_data.sv) consumes two independently paced streams, compares all 588 output bits, and checks requests, status, snapshots, flow control and cycle budgets.

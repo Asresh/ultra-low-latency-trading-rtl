@@ -3,7 +3,10 @@
 
 // Expected events are FIFO-ordered independently for each session. No fixed
 // cross-session order is imposed while the physical lanes run concurrently.
-module tb_multisession_market_data #(parameter bit BOUNDED = 0);
+module tb_multisession_market_data #(
+    parameter bit BOUNDED = 0,
+    parameter bit GUARDED = 0
+);
     localparam integer SLOTS = 3, EPOCH_W = 3, WAIT_W = 8;
     localparam integer SLOT_W = 2, KEY_W = 2, EXPECT_DEPTH = 4096;
     localparam logic [79:0] ALPHA = "ALPHA00001", BETA = "BETA000002",
@@ -45,12 +48,21 @@ module tb_multisession_market_data #(parameter bit BOUNDED = 0);
     wire [31:0] monitor_statistic, monitor_events, monitor_requests;
     wire [WAIT_W-1:0] monitor_cooldown;
 
+    wire [1:0] receiver_valid, receiver_ready, receiver_first, receiver_last;
+    wire [127:0] receiver_data;
+    wire [15:0] receiver_keep;
+    wire [2*KEY_W-1:0] receiver_slots;
+
     multisession_market_data #(
         .SLOTS(SLOTS), .EPOCH_W(EPOCH_W), .WAIT_W(WAIT_W),
         .PACKET_BYTES(128), .BLOCKS(8), .WINDOW(8), .GAP_TICKS(20),
         .MAX_REQUESTS_PER_HEAD(BOUNDED ? {16'd0,16'd3,16'd2} : 48'd0),
         .RETRY_BACKOFF_SHIFT(BOUNDED ? {4'd0,4'd2,4'd1} : 12'd0)
-    ) dut (.*);
+    ) dut (
+        .feed_valid(receiver_valid), .feed_ready(receiver_ready),
+        .feed_data(receiver_data), .feed_keep(receiver_keep),
+        .feed_first(receiver_first), .feed_last(receiver_last), .feed_slots(receiver_slots), .*
+    );
 
     integer accepted_events = 0, accepted_requests = 0, accepted_acks = 0;
     integer accepted_beats = 0, held_events = 0, held_requests = 0;
@@ -71,6 +83,39 @@ module tb_multisession_market_data #(parameter bit BOUNDED = 0);
     integer recorded_slot [0:1][0:511];
     logic [1:0] recorded_framing [0:1][0:511];
     integer recorded_length [0:1];
+
+    logic execute_guard = 0;
+    wire guard_complete;
+    if (GUARDED) begin : guarded_return
+        assign receiver_valid[0] = feed_valid[0];
+        assign feed_ready[0] = receiver_ready[0];
+        assign receiver_data[63:0] = feed_data[63:0];
+        assign receiver_keep[7:0] = feed_keep[7:0];
+        assign receiver_first[0] = feed_first[0];
+        assign receiver_last[0] = feed_last[0];
+        assign receiver_slots[KEY_W-1:0] = feed_slots[KEY_W-1:0];
+
+        tb_guarded_repair_driver #(.EPOCH_W(EPOCH_W), .KEY_W(KEY_W)) repair_adapter (
+            .clk, .rst, .execute(execute_guard), .complete(guard_complete),
+            .request_a(last_payload[0]), .request_b(last_payload[1]),
+            .live_valid(feed_valid[1]), .live_ready(feed_ready[1]),
+            .live_data(feed_data[127:64]), .live_keep(feed_keep[15:8]),
+            .live_first(feed_first[1]), .live_last(feed_last[1]), .live_slot(feed_slots[2*KEY_W-1:KEY_W]),
+            .output_valid(receiver_valid[1]), .output_ready(receiver_ready[1]),
+            .output_data(receiver_data[127:64]), .output_keep(receiver_keep[15:8]),
+            .output_first(receiver_first[1]), .output_last(receiver_last[1]),
+            .output_slot(receiver_slots[2*KEY_W-1:KEY_W])
+        );
+    end else begin : direct_return
+        assign receiver_valid = feed_valid;
+        assign feed_ready = receiver_ready;
+        assign receiver_data = feed_data;
+        assign receiver_keep = feed_keep;
+        assign receiver_first = feed_first;
+        assign receiver_last = feed_last;
+        assign receiver_slots = feed_slots;
+        assign guard_complete = 0;
+    end
 
     always @(posedge clk) begin
         cycle = cycle + 1;
@@ -387,7 +432,13 @@ module tb_multisession_market_data #(parameter bit BOUNDED = 0);
                     $fdisplay(file,"%0d %0d %040h",index,configured_epoch[index],last_payload[index]);
                 $fclose(file);
             end
-            if ($value$plusargs("repair=%s",repair_file)) begin
+            if (GUARDED) begin
+                execute_guard = 1;
+                fork
+                    wait (guard_complete);
+                    repeat (24) send_delete(1,2,GAMMA,501,64'habad4321,0,6);
+                join
+            end else if ($value$plusargs("repair=%s",repair_file)) begin
                 file = $fopen(repair_file,"r");
                 if (file == 0)
                     $fatal(1, "cannot open archive-generated repair bytes");

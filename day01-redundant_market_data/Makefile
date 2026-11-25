@@ -8,6 +8,10 @@ SEED ?= 7201
 BUILD := build
 RTL := $(shell cat rtl.f)
 MULTI_RTL := $(shell cat multisession.f)
+GUARD_RTL := $(shell cat recovery_guard.f)
+GUARD_AUX := $(filter-out mold_pair_ram.sv,$(GUARD_RTL))
+GUARD_HEADER := mold_recovery_codes.svh
+GUARD_TB := tb_mold_recovery_guard
 
 .PHONY: all test test-default test-multisession test-recovery-loop test-retry-policy icarus regress lint synth synth-multisession synth-retry-policy formal clean
 all: test
@@ -38,6 +42,7 @@ regress:
 	$(MAKE) test-multisession SEED=98741
 	$(MAKE) test-recovery-loop
 	$(MAKE) test-retry-policy
+	$(MAKE) test-recovery-guard
 
 $(BUILD)/multisession.vvp: $(RTL) $(MULTI_RTL) rtl.f multisession.f tb_multisession_market_data.sv
 	mkdir -p $(BUILD)
@@ -66,12 +71,12 @@ test-retry-policy: $(BUILD)/retry-scheduler.vvp $(BUILD)/multisession-bounded.vv
 	$(VVP) $(BUILD)/retry-scheduler.vvp
 	$(VVP) $(BUILD)/multisession-bounded.vvp +vectors=$(BUILD)/multisession-98741.txt
 
-lint:
+lint: lint-recovery-guard
 	$(VERILATOR) --lint-only --Wall --top-module redundant_market_data -f rtl.f
 	$(VERILATOR) --lint-only --Wall --top-module multisession_market_data -f rtl.f -f multisession.f
 	$(VERILATOR) --lint-only --Wall --top-module mold_reorder -GMAX_REQUESTS_PER_HEAD=4 -GRETRY_BACKOFF_SHIFT=2 mold_reorder.sv
 
-synth: synth-multisession synth-retry-policy
+synth: synth-multisession synth-retry-policy synth-recovery-guard
 	mkdir -p $(BUILD)
 	$(YOSYS) -ql $(BUILD)/synth.log -p 'read_verilog -sv $(RTL); synth -top redundant_market_data -noabc; check -assert; stat; write_json $(BUILD)/market_data.json'
 	tail -n 24 $(BUILD)/synth.log
@@ -85,16 +90,16 @@ synth-retry-policy:
 	mkdir -p $(BUILD)
 	$(YOSYS) -ql $(BUILD)/retry-policy-synth.log -m slang -p 'read_slang --top mold_reorder -GGAP_TICKS=4 -GMAX_REQUESTS_PER_HEAD=4 -GRETRY_BACKOFF_SHIFT=2 mold_reorder.sv; synth -top mold_reorder -noabc; check -assert; stat'
 
-formal:
+formal: formal-recovery-guard
 	mkdir -p $(BUILD)
 	cd formal && $(SBY) -f --prefix ../$(BUILD)/session session.sby
 
 clean:
 	rm -rf $(BUILD) __pycache__
 
-.PHONY: waveform waveform-multisession waveform-retry-policy
+.PHONY: waveform waveform-multisession waveform-retry-policy waveform-recovery-guard
 
-waveform: build/market_data.vvp ../scripts/render_vcd_waveform.py waveform-multisession waveform-retry-policy
+waveform: build/market_data.vvp ../scripts/render_vcd_waveform.py waveform-multisession waveform-retry-policy waveform-recovery-guard
 	$(PYTHON) -B scenarios.py --output $(BUILD)/waveform --seed 7201
 	$(VVP) $< +vectors=$(BUILD)/waveform +waveform=$(BUILD)/redundant_market_data.vcd
 	mkdir -p docs
@@ -135,3 +140,64 @@ waveform-retry-policy: $(BUILD)/retry-scheduler.vvp ../scripts/render_vcd_wavefo
 		--signal 'tb_mold_reorder_retry.dut.retry_policy.attempts=Current Head Attempts' \
 		--signal 'tb_mold_reorder_retry.m_valid=Passive Repair Available' \
 		--signal 'tb_mold_reorder_retry.expected_sequence=Current Head Sequence'
+
+.PHONY: test-recovery-guard test-guarded-recovery-loop lint-recovery-guard synth-recovery-guard formal-recovery-guard waveform-recovery-guard
+
+$(BUILD)/recovery-guard.vvp: $(GUARD_TB).sv $(GUARD_RTL) $(GUARD_HEADER) recovery_guard.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -Wall -s $(GUARD_TB) -o $@ -f recovery_guard.f $<
+
+$(BUILD)/recovery-guard-default.vvp: $(GUARD_TB).sv $(GUARD_RTL) $(GUARD_HEADER) recovery_guard.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -Wall -s $(GUARD_TB) -P$(GUARD_TB).PACKET_BYTES=256 \
+		-P$(GUARD_TB).MESSAGE_BYTES=64 -P$(GUARD_TB).BLOCKS=16 -P$(GUARD_TB).WINDOW=16 \
+		-P$(GUARD_TB).EPOCH_W=16 -P$(GUARD_TB).TOKEN_W=16 -o $@ -f recovery_guard.f $<
+
+$(BUILD)/recovery-dispatch.vvp: tb_mold_recovery_dispatch.sv mold_recovery_dispatch.sv $(GUARD_HEADER)
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -Wall -s tb_mold_recovery_dispatch -o $@ $(filter %.sv,$^)
+
+$(BUILD)/guarded-repair.vvp: tb_multisession_market_data.sv tb_guarded_repair_driver.sv $(RTL) $(MULTI_RTL) $(GUARD_AUX) $(GUARD_HEADER) rtl.f multisession.f recovery_guard.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -Wall -s tb_multisession_market_data -Ptb_multisession_market_data.GUARDED=1 \
+		-o $@ -f rtl.f -f multisession.f $(GUARD_AUX) tb_multisession_market_data.sv tb_guarded_repair_driver.sv
+
+test-guarded-recovery-loop: $(BUILD)/guarded-repair.vvp $(BUILD)/multisession.vvp $(BUILD)/multisession-73457.txt
+	$(VVP) $(BUILD)/multisession.vvp +vectors=$(BUILD)/multisession-73457.txt +requests=$(BUILD)/guard-requests.txt
+	$(PYTHON) -B guarded_repair_fixture.py $(BUILD)/guard-requests.txt $(BUILD)/guarded-repair-loop.txt
+	$(VVP) $< +vectors=$(BUILD)/multisession-73457.txt +guarded_repair=$(BUILD)/guarded-repair-loop.txt
+
+test-recovery-guard: $(BUILD)/recovery-guard.vvp $(BUILD)/recovery-guard-default.vvp $(BUILD)/recovery-dispatch.vvp test-guarded-recovery-loop
+	$(PYTHON) -B recovery_guard_vectors.py $(BUILD)/recovery-guard.txt
+	$(VVP) $< +vectors=$(BUILD)/recovery-guard.txt
+	$(PYTHON) -B recovery_guard_vectors.py $(BUILD)/recovery-guard-default.txt --default --seed 61227
+	$(VVP) $(BUILD)/recovery-guard-default.vvp +vectors=$(BUILD)/recovery-guard-default.txt
+	$(VVP) $(BUILD)/recovery-dispatch.vvp
+
+lint-recovery-guard:
+	$(VERILATOR) --lint-only --Wall --top-module mold_recovery_guard -f recovery_guard.f
+	$(VERILATOR) --lint-only --Wall --top-module mold_recovery_dispatch -f recovery_guard.f
+	$(VERILATOR) --lint-only --Wall --top-module mold_repair_lane_mux -f recovery_guard.f
+
+synth-recovery-guard:
+	mkdir -p $(BUILD)
+	@set -e; for top in mold_recovery_guard mold_recovery_dispatch mold_repair_lane_mux; do \
+		$(YOSYS) -ql $(BUILD)/$$top-synth.log -m slang -p "read_slang --top $$top $(GUARD_RTL); synth -top $$top -noabc; check -assert; stat"; \
+	done
+
+formal-recovery-guard:
+	mkdir -p $(BUILD)
+	cd formal && $(SBY) -f --prefix ../$(BUILD)/formal-lease recovery_leases.sby
+
+waveform-recovery-guard: $(BUILD)/recovery-guard.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B recovery_guard_vectors.py $(BUILD)/recovery-guard-wave.txt --cycles 0
+	$(VVP) $< +vectors=$(BUILD)/recovery-guard-wave.txt +waves=$(BUILD)/recovery-guard.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/recovery-guard.vcd docs/recovery-guard.svg \
+		--start 1740 --end 2800 --title 'Day 01 · Recovery lease checks and replay fence' \
+		--signal '$(GUARD_TB).audit_status=Audit Verdict' \
+		--signal '$(GUARD_TB).audit_valid=Audit Valid' \
+		--signal '$(GUARD_TB).audit_ready=Audit Ready' \
+		--signal '$(GUARD_TB).audit_coverage=Admitted Coverage' \
+		--signal '$(GUARD_TB).replay_valid=Replay Valid' \
+		--signal '$(GUARD_TB).replay_ready=Replay Ready' \
+		--signal '$(GUARD_TB).dut.leases.replay_fence=Same-slot Epoch Fence'

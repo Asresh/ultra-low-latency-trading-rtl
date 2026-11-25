@@ -1,0 +1,21 @@
+[tasks]
+safety
+examples
+
+[options]
+safety: mode bmc
+safety: depth 16
+examples: mode cover
+examples: depth 18
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -sv mold_recovery_leases.sv formal_recovery_leases.sv
+prep -top formal_recovery_leases
+
+[files]
+../mold_recovery_codes.svh
+../mold_recovery_leases.sv
+formal_recovery_leases.sv

@@ -2,6 +2,10 @@
 
 This RTL block arbitrates traffic from several classes onto a shared order egress. Each class has its own FIFO and a budget for work the downstream adapter can hold. The scheduler spends credit when an order transfers. When the adapter releases the corresponding resource, it returns credit and makes that budget available again.
 
+
+The [leased credit scheduler](leases.md) adds a single-use completion
+token to each transmitted order and applies its exact refund once.
+
 ## Where it fits
 
 - **Cancel and new-order traffic on one transmit path.** Give cancels a small independent queue and credit budget. If the new-order lane runs out of capacity, a queued cancel with available credit can still compete for the next opportunity. The classifier and session sequencer remain outside the core. Keep dependent messages in the same FIFO or explicitly sequence them upstream. CME Group documents separate cancel and common application message controls on iLink sessions. Those time-window policies belong in the session’s rate controls. The example here budgets local adapter capacity. [CME Group iLink messaging controls](https://cmegroupclientsite.atlassian.net/wiki/spaces/EPICSANDBOX/pages/457317540/)

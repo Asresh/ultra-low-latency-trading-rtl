@@ -1,0 +1,23 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 16
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top leased_credit_scheduler -D FORMAL_LEASES -G CLASSES=2 -G DEPTH=2 -G CREDIT_W=3 -G TAG_W=4 -G PAYLOAD_W=4 -G LEASE_SLOTS=2 -G GEN_W=2 leased_credit_scheduler.sv credit_order_scheduler.sv
+prep -top leased_credit_scheduler
+memory_map
+opt
+check -assert
+
+[files]
+leased_credit_scheduler.sv
+credit_order_scheduler.sv

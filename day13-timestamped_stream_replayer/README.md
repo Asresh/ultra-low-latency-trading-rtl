@@ -87,6 +87,71 @@ The simulator saves every observed pin snapshot under `build/`. The independent 
 
 The core can offer one beat per clock within a pass when consecutive events are due and the sink stays ready. This is a simulated interface throughput. Default-depth generic Yosys synthesis produced 6,815 cells before FPGA mapping and is used as a structural check.
 
+## Scheduled two-bank replay
+
+Use [banked_stream_replayer.sv](banked_stream_replayer.sv) when the next replay tape needs to load while the current tape plays. The manager owns two independent copies of the original engine. One stream is selected at a time. An inactive writable bank can accept APPEND and CLEAR while the other bank supplies data. Once START reserves a complete tape, that tape is immutable until cancellation or retirement. A reservation can wait for a wall-clock release or for another run to finish.
+
+```mermaid
+flowchart LR
+    H["Tape loader and run controls"] --> M["Ownership and reservation"]
+    W["Wall clock"] --> M
+    M --> A["Bank A<br/>tape and virtual scheduler"]
+    M --> B["Bank B<br/>tape and virtual scheduler"]
+    A --> S["Single ready/valid stream"]
+    B --> S
+    M --> C["Run starts and retirements"]
+    classDef host fill:#dbeafe,stroke:#2563eb,color:#10275b
+    classDef control fill:#ede9fe,stroke:#6d28d9,color:#2e1065
+    classDef memory fill:#fef3c7,stroke:#d97706,color:#533200
+    classDef output fill:#dcfce7,stroke:#16a34a,color:#11432e
+    class H,W host
+    class M control
+    class A,B memory
+    class S,C output
+```
+
+For hardware regression, run a baseline burst tape through a feed decoder while staging a capture of a second trading session. Arm the second tape with a release tick and use run IDs to correlate transmitted beats and timing measurements with the original capture. The manager allows software to prepare one image in the background and record how long a due reservation waited for the old run. A delayed sink can move the start later than the requested release. Use a margin between scheduled runs when wall-clock alignment matters. Virtual due and offered ticks remain relative to the started run, so a run's pause and sink backpressure can be analyzed separately.
+
+### Ownership and scheduling
+
+| Bank state | Meaning |
+| --- | --- |
+| 0 WRITABLE | Holds a retained tape or an empty image. Appends and clear use the legacy tape validation. |
+| 1 ARMED | One scheduled reservation owns this bank. Appends and clear return BUSY. |
+| 2 PLAYING | This bank owns the output, including any held final beat and the retirement edge. Appends and clear return BUSY. |
+
+`cfg_bank` selects the addressed bank. The 64-bit `wall_tick` starts at zero and saturates. It advances through pauses, idle periods, and output stalls. START validates the addressed image and repeat count, reserves the single pending slot, and returns a fresh nonzero ID. The address must be writable and the pending slot empty. `cfg_release_tick` applies to the startup edge, and a release set in the past becomes eligible on the next edge after reservation. `cfg_repeats` and `cfg_gap` are latched with the reservation. Once a reservation is due, the manager can start it on the edge that retires the previous run. First output still follows the normal scheduler latency.
+
+PAUSE, RESUME, and STOP require the active bank and its exact `cfg_run_id`. CANCEL (opcode 6) requires the armed bank and its exact ID. An accepted cancellation on the release edge prevents launch. INSPECT (opcode 7) reports a bank's state, run ID, image length, and whether the last packet is open. The command slot and reply use ready/valid handshakes. The response includes the echoed opcode and bank. Local management commands return a registered response. Native commands wait for the bank's response, echo its status, and capture its final tape length and framing state. The reported bank owner is the state at command acceptance, with successful START and CANCEL returning the resulting state. Another edge can change the live state before the reply transfers.
+
+A stale ID for an existing armed or playing bank returns status 11. A command targeting a bank in the wrong state returns BAD_STATE (10). Status 12 reports ID exhaustion on a valid START. The default 32-bit counter increments on accepted reservations, including subsequently cancelled reservations. It stops at its maximum, so a delayed STOP cannot target a reused ID within that reset epoch. Hardware reset discards both tapes, the pending reservation, any held output, and all counters. A cross-reset host must clear its outstanding commands and assign its own epoch if it logs run IDs persistently.
+
+### Stream and retirement
+
+The output beat fields are the original replayer fields plus `m_bank` and `m_run_id`. These identify the owner while `active` is asserted. The virtual tick follows the owner and is zero when no run owns the stream. No ownership change can interrupt a held output beat. `run_started` pulses with the new owner and the absolute `run_start_tick`. `done` pulses with the retiring bank, ID, absolute retirement tick, and the final beat, packet, late-offer, and pass counts. The done record remains readable until the next retirement. These pulses are synchronous observations and have no ready input.
+
+When the sink releases an already offered beat following STOP, the beat transfers before retirement. `done_stopped` identifies a stop-terminated run. `done_truncated` tells a downstream packet assembler to discard an unfinished packet from the retiring run. The flags are delivered with that run's ID before any beat from the next run can transfer. An assembler should process both fields when it observes `done`. A new run can announce its start on that same edge. Cumulative counters track starts, retirements, cancellations, and eligible reserved cycles spent waiting for an owner. The counters saturate at 2³²−1.
+
+Defaults are 16 beats per bank and a 32-bit run ID. The manager synthesizes as an independent top and clocks both tape engines together. The measured interface behavior is simulation evidence. Mapped memory, physical clock rate, and asynchronous host adaptation depend on integration.
+
+### Run the banked cases
+
+```sh
+make test-banked
+make test-banked-bundle
+make formal-banked
+make synth-banked
+make waveform-banked
+```
+
+Two seeded scoreboards compare 13,138 cycles, including 681 accepted beats, 26 retirement/start overlaps, and 210 staging writes while another bank plays. The formal harness checks held outputs and responses, owner stability, and retired run accounting for 18 edges. It covers handoff, packet truncation, stale IDs, and staging while active.
+
+The bundle test verifies the manifest and TRP checksums, writes complete partitions into alternating banks, and captures actual RTL handshakes to `build/banked-accepted.csv`. The audit checks each accepted payload, mask, tag, relative due tick, bank and run ID against the originating partition. The same compiler accepts a bundle built with `replay_partition.py split`. To run a custom bundle, build its vectors with `replay_banked_bundle.py build DIRECTORY OUTPUT`, then supply `+vectors=OUTPUT +capture=PATH +bundle` to a bench built for its chosen depth and ID width. The compiler enforces a configurable simulation cycle budget. A run can start late while its tape loads or while the prior run holds the output.
+
+![Inactive tape staging and safe run handoff](banked-waveform.svg)
+
+In this simulation the first run starts at 165 ns and holds its first beat from 175 ns. The second bank accepts its own write and becomes reserved at 195 ns while the first is active. The pending release waits while the sink keeps ready low. At 345 ns, the held beat finally transfers. At 355 ns, the old run retires with its packet truncation flag and the second run becomes the owner. The second bank offers its first beat at 365 ns.
+
 ## Make your own replay tape
 
 Create `build/packets.csv` with a header and exact decimal nanosecond timestamps. The payload field is unseparated hexadecimal.

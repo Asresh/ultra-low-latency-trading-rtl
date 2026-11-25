@@ -1,0 +1,26 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 15
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top quote_inventory_manager -I. -D FORMAL_INVENTORY -G INSTRUMENTS=2 -G LEVELS=7 -G POS_W=4 -G QTY_W=3 -G RESERVE_W=5 -G EPOCH_W=2 -G SEQ_W=2 -G REV_W=2 -G TAG_W=4 quote_inventory_manager.sv quote_inventory_ledger.sv quote_inventory_overlay.sv
+prep -top quote_inventory_manager
+memory_map
+setundef -undriven -anyseq
+opt
+check -assert
+
+[files]
+../quote_inventory_manager.sv
+../quote_inventory_ledger.sv
+../quote_inventory_overlay.sv
+../quote_inventory_codes.svh

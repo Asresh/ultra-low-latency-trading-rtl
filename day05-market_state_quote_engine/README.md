@@ -18,6 +18,9 @@ A synthesizable SystemVerilog market-by-order subscriber for a normalized synthe
 The optional [quote-to-order bridge](order-bridge.md) turns a quote intent
 into acknowledged adds and cancels. It rejects stale adds and waits for a
 confirmed cancel before placing a replacement that would cross an old order.
+The optional [inventory-aware planner](inventory-quote.md) composes with
+the market intent stream and qualifies each side against confirmed signed
+inventory, working leaves, and instrument-specific quote caps.
 
 ## Architecture
 

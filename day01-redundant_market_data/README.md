@@ -4,6 +4,8 @@ A dual-feed Nasdaq MoldUDP64 receiver that turns UDP payload bytes into one orde
 
 The top level is [`redundant_market_data.sv`](redundant_market_data.sv). [`rtl.f`](rtl.f) lists the synthesizable sources in dependency order.
 
+The [multi-session receiver and recovery archive](docs/multisession.md) extend this block with isolated session slots, epoch-fenced replacement, independently paced recovery requests and a checked hardware–software repair loop.
+
 ## Run
 
 ```sh
@@ -12,9 +14,12 @@ make test-default
 make regress
 make lint
 make synth
+make formal
 ```
 
 Simulation uses Icarus Verilog and the Python standard library. Use Verilator for RTL lint and Yosys for generic synthesis and structural checks. The build directory holds generated vectors, the simulator and synthesis output. The generic netlist expands memories into registers. Use the repository's device mapping flow for FPGA resources and timing.
+
+`make regress` checks the single-session core and the multi-session extension. `make synth` checks both synthesis tops, and `make waveform` reproduces both diagrams.
 
 ## Data path
 

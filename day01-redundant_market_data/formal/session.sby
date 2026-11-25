@@ -1,0 +1,21 @@
+[tasks]
+safety
+scenarios
+
+[options]
+safety: mode bmc
+safety: depth 18
+scenarios: mode cover
+scenarios: depth 20
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -sv mold_session_mux.sv mold_session_config.sv formal_mold_session.sv
+prep -top formal_mold_session
+
+[files]
+../mold_session_mux.sv
+../mold_session_config.sv
+formal_mold_session.sv

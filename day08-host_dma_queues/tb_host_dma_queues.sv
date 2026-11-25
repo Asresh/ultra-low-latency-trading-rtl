@@ -435,6 +435,7 @@ module tb_host_dma_queues #(
 
 `include "tb_dma_readback.svh"
 `include "tb_dma_scatter.svh"
+`include "tb_dma_checkpoint.svh"
 
     task automatic run_isolated_access;
         logic [63:0] peer_payload;
@@ -478,6 +479,10 @@ module tb_host_dma_queues #(
         open_capture();
         integrity_run = $test$plusargs("readback") || $test$plusargs("isolation-access");
         reset_core();
+        if ($test$plusargs("checkpoint")) begin
+            run_checkpoint();
+            $finish;
+        end
         if ($test$plusargs("segment-capacity")) begin
             run_segment_capacity();
             $finish;

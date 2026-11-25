@@ -8,6 +8,8 @@ The [memory integrity path](#memory-readback-and-verified-capture) adds digest-o
 
 [Scatter/gather descriptors](scatter_gather.md) move or verify a logical packet across disjoint AXI address ranges. The [checked segmented waveform](scatter_waveform.svg) shows the payload writes retiring before readback and completion publication.
 
+The [restart journal](queue_checkpoint.md) preserves host submission intent and archives committed completions before granting new CQ credit. Its [RTL capture](checkpoint_waveform.svg) crosses 32-bit cursor rollover with a completion write response held.
+
 ```mermaid
 flowchart LR
     Host["Host rings and doorbells"] --> Queues["Queue table<br/>credits, bounds and IRQ"]

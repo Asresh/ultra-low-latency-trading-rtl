@@ -8,12 +8,13 @@ TOP := host_dma_queues
 RTL := $(shell cat rtl.f)
 HEADERS := dma_protocol.svh
 MEMORY_MODEL := tb_dma_memory.sv
-INTEGRATION_HEADERS := tb_dma_readback.svh tb_dma_scatter.svh
+INTEGRATION_HEADERS := tb_dma_readback.svh tb_dma_scatter.svh tb_dma_checkpoint.svh
 
 .PHONY: waveform wave-vcd waveform-readback waveform-scatter all test regress icarus test-host test-components test-integration test-readback test-isolation test-scatter lint synth clean
+.PHONY: test-checkpoint checkpoint-capture waveform-checkpoint
 all: test
 regress icarus: test
-test: test-host test-components test-integration test-readback test-isolation test-scatter
+test: test-host test-components test-integration test-readback test-isolation test-scatter test-checkpoint
 
 test-host: | $(BUILD)
 	$(PYTHON) -B -m unittest discover -v
@@ -44,6 +45,25 @@ test-scatter: $(BUILD)/tb_host_dma_queues.vvp $(BUILD)/tb_host_dma_seg1.vvp $(BU
 	$(VVP) $< +scatter +capture=$(BUILD)/scatter
 	$(PYTHON) -B audit_dma_scatter.py $(BUILD)/scatter
 	@set -e; for bench in $^; do $(VVP) "$$bench" +segment-capacity; done
+
+test-checkpoint: checkpoint-capture
+	$(PYTHON) -B audit_dma_checkpoint.py $(BUILD)/checkpoint
+
+checkpoint-capture: $(BUILD)/tb_host_dma_queues.vvp
+	mkdir -p $(BUILD)/checkpoint
+	$(VVP) $< +checkpoint +checkpoint-dir=$(BUILD)/checkpoint +waves=$(BUILD)/checkpoint/checkpoint.vcd
+
+waveform-checkpoint: test-checkpoint ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/checkpoint/checkpoint.vcd checkpoint_waveform.svg \
+		--start 115 --end 1080 --title 'Day 08 · Crash recovery follows committed ring cursors' \
+		--signal 'tb_host_dma_queues.checkpoint_phase=Snapshot count' \
+		--signal 'tb_host_dma_queues.block_write_response=Memory holds B' \
+		--signal 'tb_host_dma_queues.wlast=Last CQ write beat' \
+		--signal 'tb_host_dma_queues.bvalid=AXI B valid' \
+		--signal 'tb_host_dma_queues.host_valid=Host doorbell valid' \
+		--signal 'tb_host_dma_queues.inspect_sq_tail=Published SQ tail' \
+		--signal 'tb_host_dma_queues.inspect_cq_tail=Committed CQ tail' \
+		--signal 'tb_host_dma_queues.inspect_cq_head=Released CQ head'
 
 waveform-readback: $(BUILD)/tb_host_dma_queues.vvp ../scripts/render_vcd_waveform.py
 	mkdir -p $(BUILD)/readback-wave

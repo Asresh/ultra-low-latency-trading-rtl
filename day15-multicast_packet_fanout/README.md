@@ -5,6 +5,8 @@ bytes without buffering a separate payload for each one. A packet can go to one
 or more destination ports. Each port advances at its own rate, and the shared
 payload remains live until its last subscriber finishes.
 
+The [subscriber-policy top](subscriber_policy.md) adds per-group mandatory and optional destinations, independent credit thresholds, versioned route snapshots, and explicit reports for partial delivery. The [checked waveform](docs/policy_waveform.svg) shows a slow recorder losing optional copies while a required consumer continues.
+
 ## Where it fits
 
 An FPGA market-data path can classify an incoming packet and send a copy of the

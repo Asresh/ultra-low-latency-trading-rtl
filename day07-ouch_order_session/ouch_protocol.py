@@ -49,6 +49,9 @@ class Status(IntEnum):
     RX_TIMEOUT = 26
     LOGIN_REJECTED = 27
     KILLED = 28
+    REPLAY_WINDOW = 29
+    REPLAY_DIVERGED = 30
+    REPLAY_FENCE = 31
 
 
 class Direction(IntEnum):

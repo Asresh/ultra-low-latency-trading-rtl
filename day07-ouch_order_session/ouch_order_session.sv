@@ -4,7 +4,8 @@
 module ouch_order_session #(
     parameter integer ORDER_SLOTS = 8,
     parameter integer TX_HEARTBEAT_TICKS = 1_000,
-    parameter integer RX_TIMEOUT_TICKS = 5_000
+    parameter integer RX_TIMEOUT_TICKS = 5_000,
+    parameter integer REPLAY_HISTORY_DEPTH = 0
 ) (
     input wire clk,
     input wire rst,
@@ -83,6 +84,13 @@ module ouch_order_session #(
                           ((!has_checkpoint && s_login.sequence_start == 1) ||
                            (has_checkpoint && s_login.session == session_q &&
                             s_login.sequence_start <= checkpoint));
+    wire [63:0] oldest_sequence;
+    wire replay_matches;
+    wire [63:0] unverified_sequence;
+    wire replay_fenced;
+    wire request_outside_window = REPLAY_HISTORY_DEPTH > 0 &&
+                                  s_login.sequence_start < oldest_sequence;
+    wire request_skips_fence = replay_fenced && s_login.sequence_start > unverified_sequence;
     wire ack_id_is_valid = valid_session(inbound.session, 1'b0) &&
                            (login_q.session == BLANK_SESSION || inbound.session == login_q.session);
     wire timeout_due = RX_TIMEOUT_TICKS != 0 && state_q == S_ACTIVE &&
@@ -96,6 +104,8 @@ module ouch_order_session #(
     wire decimal_accept_ready, decimal_output_valid, decoded_sequence_ok;
     wire [63:0] decimal_number;
     wire [159:0] decimal_ascii;
+    wire peer_outside_window = REPLAY_HISTORY_DEPTH > 0 && decimal_number < oldest_sequence;
+    wire peer_skips_fence = REPLAY_HISTORY_DEPTH > 0 && decimal_number > login_q.sequence_start;
 
     logic take_login, take_login_ack, finish_login, finish_logout, launch_logout;
     logic saw_heartbeat, send_heartbeat;
@@ -144,6 +154,45 @@ module ouch_order_session #(
         .inbound, .sequence_id(socket_cursor), .rx_commit(order_commit), .rx_notice(order_notice),
         .query_slot, .query_view, .highest_order_ref, .live_count, .pending_count
     );
+
+    if (REPLAY_HISTORY_DEPTH > 0) begin : g_replay_verification
+        logic fence_q;
+        logic [63:0] verify_q;
+        assign replay_fenced = fence_q;
+        assign unverified_sequence = verify_q;
+
+        ouch_replay_window #(.DEPTH(REPLAY_HISTORY_DEPTH)) history (
+            .clk, .rst, .next_sequence(checkpoint), .packet,
+            .commit(next_event), .begin_replay(finish_login),
+            .replay_start(decimal_number), .verify_next(drop_replay),
+            .replay_cursor(socket_cursor), .oldest_sequence,
+            .packet_matches(replay_matches)
+        );
+
+        // Accepting an overlapping request establishes the obligation even
+        // if the link drops before the peer acknowledges it. A byte mismatch
+        // consumes no replay position.
+        always_ff @(posedge clk) begin
+            if (rst) begin
+                fence_q <= 1'b0;
+                verify_q <= 1;
+            end else if (take_login && s_login.sequence_start < checkpoint) begin
+                fence_q <= 1'b1;
+                verify_q <= s_login.sequence_start;
+            end else if (finish_login) begin
+                fence_q <= decimal_number < checkpoint;
+                verify_q <= decimal_number;
+            end else if (drop_replay) begin
+                fence_q <= socket_cursor + 1'b1 < checkpoint;
+                verify_q <= socket_cursor + 1'b1;
+            end
+        end
+    end else begin : g_position_only
+        assign oldest_sequence = 64'd1;
+        assign replay_matches = 1'b1;
+        assign replay_fenced = 1'b0;
+        assign unverified_sequence = 64'd0;
+    end
 
     always @* begin
         urgent_fault = ST_OK;
@@ -266,8 +315,13 @@ module ouch_order_session #(
                                     notice_d = session_notice(N_FAULT, ST_SEQUENCE_OVERFLOW, socket_cursor, 0);
                                     this_fault = 1'b1;
                                 end else if (!caught_up) begin
-                                    notice_d = session_notice(N_REPLAY, ST_OK, socket_cursor, 0);
-                                    drop_replay = 1'b1;
+                                    if (replay_matches) begin
+                                        notice_d = session_notice(N_REPLAY, ST_OK, socket_cursor, 0);
+                                        drop_replay = 1'b1;
+                                    end else begin
+                                        notice_d = session_notice(N_FAULT, ST_REPLAY_DIVERGED, socket_cursor, 0);
+                                        this_fault = 1'b1;
+                                    end
                                 end else if (inbound.ouch_type == "S") begin
                                     notice_d = session_notice(N_SYSTEM, ST_OK, socket_cursor, inbound.reason);
                                     notice_d.timestamp = inbound.timestamp;
@@ -318,6 +372,11 @@ module ouch_order_session #(
                                  (!has_checkpoint && decimal_number != login_q.sequence_start)) begin
                         notice_d = session_notice(N_FAULT, ST_SEQUENCE_GAP, decimal_number, 0);
                         this_fault = 1'b1;
+                    end else if (peer_outside_window || peer_skips_fence) begin
+                        notice_d = session_notice(N_FAULT, ST_REPLAY_FENCE, decimal_number, 0);
+                        if (peer_outside_window)
+                            notice_d.status = ST_REPLAY_WINDOW;
+                        this_fault = 1'b1;
                     end else begin
                         notice_d = session_notice(N_LOGIN, ST_OK, decimal_number, 0);
                         state_d = S_ACTIVE;
@@ -327,12 +386,18 @@ module ouch_order_session #(
             end else if (transport_up && login_port_idle && s_login_valid) begin
                 s_login_ready = space && decimal_accept_ready;
                 if (s_login_ready) begin
-                    if (login_is_valid) begin
+                    if (login_is_valid && !request_outside_window && !request_skips_fence) begin
                         take_login = 1'b1;
                         decimal_request = 1'b1;
                         state_d = S_LOGIN_BUILD;
                     end else begin
                         notice_d = session_notice(N_LOGIN_REJECT, ST_LOGIN_TEXT, checkpoint, 0);
+                        if (login_is_valid) begin
+                            notice_d.status = ST_REPLAY_FENCE;
+                            notice_d.sequence_id = s_login.sequence_start;
+                            if (request_outside_window)
+                                notice_d.status = ST_REPLAY_WINDOW;
+                        end
                         notice_write = 1'b1;
                     end
                 end

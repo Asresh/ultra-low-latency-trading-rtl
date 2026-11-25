@@ -2,7 +2,8 @@
 `default_nettype none
 
 module tb_ouch_order_session #(
-    parameter integer ORDER_SLOTS = 8
+    parameter integer ORDER_SLOTS = 8,
+    parameter integer REPLAY_HISTORY_DEPTH = 0
 );
     import ouch_wire_pkg::*;
     localparam integer NOTICE_BITS = $bits(notice_t);
@@ -45,7 +46,7 @@ module tb_ouch_order_session #(
     wire [7:0] live_count, pending_count;
 
     ouch_order_session #(.ORDER_SLOTS(ORDER_SLOTS), .TX_HEARTBEAT_TICKS(4),
-                         .RX_TIMEOUT_TICKS(7)) dut (.*);
+                         .RX_TIMEOUT_TICKS(7), .REPLAY_HISTORY_DEPTH(REPLAY_HISTORY_DEPTH)) dut (.*);
 
     wire [SNAPSHOT_BITS-1:0] snapshot = {
         session_state, last_fault, session_id, next_sequence, replaying, market_open,

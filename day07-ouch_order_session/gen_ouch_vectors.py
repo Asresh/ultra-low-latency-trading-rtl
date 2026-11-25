@@ -73,9 +73,9 @@ class Stimulus:
 
 
 class Scenario:
-    def __init__(self, slots: int):
+    def __init__(self, slots: int, replay_depth: int = 0):
         """Initialize the session oracle, board state and reproducible output trails."""
-        self.device = Session(slots=slots)
+        self.device = Session(slots=slots, replay_depth=replay_depth)
         self.actions: list[Stimulus] = []
         self.notices: list[Notice] = []
         self.packets: list[bytes] = []
@@ -691,7 +691,8 @@ def randomized(s: Scenario, seed: int, operations: int) -> None:
     s.up()
     for pos in range(operations):
         if pos % 71 == 70 and len(s.history) >= 2:
-            lookback = min(len(s.history), rng.randint(0, 3))
+            max_lookback = min(3, s.device.replay_depth or 3)
+            lookback = min(len(s.history), rng.randint(0, max_lookback))
             begin = s.device.checkpoint - lookback
             s.reconnect(begin)
             for frame in s.history[begin - 1:]:

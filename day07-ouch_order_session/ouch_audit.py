@@ -111,9 +111,9 @@ class TranscriptError(RuntimeError):
 class TranscriptAuditor:
     """Track externally observable sequencing and order state across captures."""
 
-    def __init__(self, slots: int = 8):
+    def __init__(self, slots: int = 8, replay_depth: int = 0):
         """Create independent client/venue framers, a session oracle and audit logs."""
-        self.session = Session(slots=slots, tx_ticks=0, rx_ticks=0)
+        self.session = Session(slots=slots, tx_ticks=0, rx_ticks=0, replay_depth=replay_depth)
         self.parsers = {direction: SoupStream() for direction in Direction}
         self.rows: list[AuditRow] = []
         self.marks: list[Mark] = []
@@ -234,8 +234,10 @@ class TranscriptAuditor:
         if kind == "L":
             assert isinstance(decoded, Login)
             notice, encoded = self.session.request_login(decoded)
-            if notice is not None or encoded != frame.frame():
-                raise TranscriptError("login request is outside accepted session bounds or encoding")
+            if notice is not None:
+                raise TranscriptError(f"transmitted login rejected by model: {Status(notice.status).name}")
+            if encoded != frame.frame():
+                raise TranscriptError("login request uses encoding outside the FPGA subset")
             self._record(t, Direction.HOST_TO_PEER, offset, kind, seq=decoded.sequence,
                          note="credentials omitted from report")
         elif kind == "U":
@@ -345,7 +347,7 @@ class TranscriptAuditor:
 
     def summary(self) -> dict[str, object]:
         """Return run counters, diagnostics and measured distributions as structured fields."""
-        return {
+        result = {
             "connections": self.epoch,
             "open_socket": self.session.up,
             "session": self.session.session.decode("ascii").strip(),
@@ -364,11 +366,20 @@ class TranscriptAuditor:
                                         if self.session.up else 0,
             "markers": [asdict(marker) for marker in self.marks],
         }
+        if self.session.replay_depth:
+            result["replay_verification"] = {
+                "capacity": self.session.replay_depth,
+                "first_covered_sequence": self.session.oldest_verifiable,
+                "first_unverified_sequence": self.session.unverified,
+            }
+        return result
 
 
-def audit_json_lines(entries: Iterable[CaptureEntry], slots: int = 8) -> TranscriptAuditor:
+def audit_json_lines(
+    entries: Iterable[CaptureEntry], slots: int = 8, replay_depth: int = 0,
+) -> TranscriptAuditor:
     """Consume a complete JSONL transcript into the independent session auditor."""
-    audit = TranscriptAuditor(slots)
+    audit = TranscriptAuditor(slots, replay_depth)
     for record_index, entry in enumerate(entries, 1):
         try:
             audit.apply(entry)
@@ -420,6 +431,7 @@ def parser() -> argparse.ArgumentParser:
     dump = commands.add_parser("audit", help="compare a local JSONL capture to the session model")
     dump.add_argument("input", type=Path)
     dump.add_argument("--slots", type=int, default=8)
+    dump.add_argument("--replay-depth", type=int, default=0, help="match the RTL replay history depth")
     dump.add_argument("--details", action="store_true")
     dump.add_argument("--fail-on-fault", action="store_true")
     check = commands.add_parser("check-tx", help="validate and compare word captures from simulation")
@@ -433,7 +445,7 @@ def main() -> int:
     args = parser().parse_args()
     try:
         if args.command == "audit":
-            audit = audit_json_lines(load_json_lines(args.input), args.slots)
+            audit = audit_json_lines(load_json_lines(args.input), args.slots, args.replay_depth)
             result = audit.summary()
             if args.details:
                 result["records"] = [asdict(row) for row in audit.rows]

@@ -97,7 +97,10 @@ package ouch_wire_pkg;
         ST_DUP_MATCH = 25,
         ST_RX_TIMEOUT = 26,
         ST_LOGIN_REJECTED = 27,
-        ST_KILLED = 28
+        ST_KILLED = 28,
+        ST_REPLAY_WINDOW = 29,
+        ST_REPLAY_DIVERGED = 30,
+        ST_REPLAY_FENCE = 31
     } status_t;
 
     typedef struct packed {

@@ -44,6 +44,8 @@ module spliced_packet_gearbox #(
 );
     localparam logic [2:0] OK=0, FRAMING=1, LENGTH=2, TOO_LONG=3, BAD_EDIT=4, BAD_PATCH=5;
     localparam logic [31:0] CRC_SEED=32'hffffffff;
+    localparam integer EDIT_COUNT_W=(PREFIX_W>16 ? PREFIX_W : 16)+2;
+    localparam logic [15:0] MAX_PACKET_BYTES=16'hffff;
     logic [7:0] mem [0:2*MAX_FRAME-1];
     logic [1:0] committed, with_crc;
     logic writer, reader;
@@ -65,10 +67,11 @@ module spliced_packet_gearbox #(
     logic invalid_patch;
     wire [16:0] trim_count={1'b0,edit_trim_head}+{1'b0,edit_trim_tail};
     wire [16:0] kept_count={1'b0,edit_length}-trim_count;
-    wire [16:0] body_count=kept_count+17'(edit_prefix_length);
-    wire [16:0] wire_count=body_count+(edit_crc ? 17'd4 : 17'd0);
+    wire [EDIT_COUNT_W-1:0] body_count=EDIT_COUNT_W'(kept_count)+EDIT_COUNT_W'(edit_prefix_length);
+    wire [EDIT_COUNT_W-1:0] wire_count=body_count+(edit_crc ? EDIT_COUNT_W'(4) : '0);
     wire invalid_edit=(edit_length==0 || trim_count>{1'b0,edit_length} ||
-                       int'(edit_prefix_length)>MAX_PREFIX || wire_count==0 || wire_count[16]);
+                       int'(edit_prefix_length)>MAX_PREFIX || wire_count==0 ||
+                       wire_count>EDIT_COUNT_W'(MAX_PACKET_BYTES));
     wire [16:0] measured_after={1'b0,measured}+{1'b0,lanes};
     wire [15:0] observed=measured_after[16] ? 16'hffff : measured_after[15:0];
     wire capture_descriptor=edit_valid && edit_ready;
@@ -100,7 +103,7 @@ module spliced_packet_gearbox #(
         if(sticky==OK) begin
             if(!framing_ok)
                 beat_fault=FRAMING;
-            else if(measured_after>17'(MAX_FRAME))
+            else if(int'(measured_after)>MAX_FRAME || measured_after[16])
                 beat_fault=TOO_LONG;
         end
         finish=(beat_fault==OK && measured_after!={1'b0,declared}) ? LENGTH : beat_fault;
@@ -243,7 +246,7 @@ module spliced_packet_gearbox #(
                 assert(m_last || (&m_keep));
             end
             if(capture_beat && beat_fault==OK)
-                assert(measured_after<=17'(MAX_FRAME) && !committed[writer]);
+                assert(int'(measured_after)<=MAX_FRAME && !measured_after[16] && !committed[writer]);
             if(collecting)
                 assert(!pending_report);
             cover(m_valid && with_crc[reader] && send_at<body_length[reader] &&

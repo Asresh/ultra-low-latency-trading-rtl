@@ -25,3 +25,13 @@ class SpliceVectorTest(unittest.TestCase):
         report, wire = evaluate(desc, list(input_words(data, 3, 1)), 3, 12, 2)
         self.assertEqual(report, (3,10,4,0))
         self.assertEqual(wire, b"\0"*4)
+
+    def test_edited_length_checks_before_narrowing(self):
+        words = list(input_words(b"abcd", 4, 0))
+        for prefix_length, expected_count, status in (
+                (65527, 65535, 0), (65528, 0, 4), (131071, 0, 4)):
+            with self.subTest(prefix_length=prefix_length):
+                desc = (4,4,0,0,prefix_length,0,0,0,0,True)
+                report, wire = evaluate(desc, words, 4, 4, 131071)
+                self.assertEqual(report, (4,4,expected_count,status))
+                self.assertEqual(len(wire), expected_count)

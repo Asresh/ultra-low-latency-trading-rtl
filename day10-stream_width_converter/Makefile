@@ -186,7 +186,7 @@ $(BUILD)/splice-$(1).vvp: $(SPLICE_TB).sv $(SPLICE_RTL) | $(BUILD)
 
 $(BUILD)/splice-$(1)/commands.txt: splice_vectors.py | $(BUILD)
 	$(PYTHON) -B splice_vectors.py $(BUILD)/splice-$(1) --in-width $(2) --out-width $(3) \
-		--capacity $(4) --prefix $(5) --seed $(6)
+		--capacity $(4) --prefix $(5) --seed $(6) $(7)
 
 .PHONY: splice-$(1)
 splice-$(1): $(BUILD)/splice-$(1).vvp $(BUILD)/splice-$(1)/commands.txt
@@ -196,8 +196,9 @@ endef
 $(eval $(call splice_case,main,8,5,128,8,76532))
 $(eval $(call splice_case,odd,3,7,31,3,27442))
 $(eval $(call splice_case,tiny,1,2,3,2,84403))
+$(eval $(call splice_case,length,8,5,8,131071,1,--frames 0 --length-boundary))
 
-splice-test: splice-main splice-odd splice-tiny
+splice-test: splice-main splice-odd splice-tiny splice-length
 
 splice-lint:
 	$(VERILATOR) --lint-only -Wall --top-module spliced_packet_gearbox $(SPLICE_RTL)

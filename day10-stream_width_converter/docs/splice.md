@@ -78,8 +78,9 @@ Each new descriptor requires room for its eventual report. A valid
 packet can drain while its report stays held. Packet and report fields
 remain stable under backpressure. Synchronous reset abandons both
 banks and the pending report. Use positive lane counts and capacities
-and a prefix buffer of at least one byte. Valid outputs fit in a
-16-bit byte count. The generic synthesis checks structure. The
+and a prefix buffer of at least one byte. Each bus is limited to
+65,535 lanes. The full output length, including prefix and CRC, must
+fit in 16 bits. The generic synthesis checks structure. The
 parallel byte extraction and CRC unroll need device-specific timing
 work for a chosen data width and clock.
 
@@ -96,7 +97,10 @@ while a second packet waits behind it.
 `make splice-test` checks 747 reports, 499 emitted packets, and 1,322
 exact output beats across 8→5, 3→7, and 1→2 lane profiles. Cases cover
 invalid patches, bad masks and first markers, empty-body CRC, changed
-length, dual-bank pressure, and repeated tags. The Python checks use
+length, dual-bank pressure, and repeated tags. A fourth profile
+checks that a 65,535-byte output transfers completely, a 65,536-byte
+output rejects, and an output beyond 131,072 bytes cannot wrap to a
+short packet. The Python checks use
 byte slices and a standard CRC implementation. `make splice-formal`
 runs a 14-edge bounded hold and geometry check with covers for mixed
 data/trailer output, invalid patches, and both output banks full.

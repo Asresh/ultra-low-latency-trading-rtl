@@ -27,10 +27,11 @@ def input_words(data, width, offset):
 def evaluate(desc, words, in_width, cap, max_prefix):
     tag, declared, head, tail, count, prefix, offset, mask, patch, add_crc = desc
     trimmed = declared-head-tail
+    output_length = trimmed+count+4*add_crc
     status = 0
     if declared > cap:
         status = 3
-    elif not declared or trimmed < 0 or count > max_prefix or trimmed+count+4*add_crc == 0:
+    elif not declared or trimmed < 0 or count > max_prefix or not 0 < output_length <= 0xffff:
         status = 4
     elif any((mask >> i) & 1 and offset+i >= trimmed for i in range(4)):
         status = 5
@@ -44,7 +45,7 @@ def evaluate(desc, words, in_width, cap, max_prefix):
         )
         received.extend((value >> (8*i)) & 0xff for i in selected)
         if not status:
-            status = 1 if not correct_shape else (3 if len(received) > cap else 0)
+            status = 1 if not correct_shape else (3 if len(received) > min(cap,0xffff) else 0)
     if not status and len(received) != declared:
         status = 2
 
@@ -60,7 +61,7 @@ def evaluate(desc, words, in_width, cap, max_prefix):
     return (tag, min(len(received), 65535), len(body), status), body
 
 
-def build(directory, iw, ow, capacity, max_prefix, seed, amount):
+def build(directory, iw, ow, capacity, max_prefix, seed, amount, length_boundary=False):
     rng = Random(seed)
     desc_rows, out_rows, reports = [], [], []
 
@@ -96,6 +97,11 @@ def build(directory, iw, ow, capacity, max_prefix, seed, amount):
     packet(base, 0x19, lane=iw-1, corrupt="bad_first")
     packet(base, 0x19, corrupt="empty")
     packet(base, 0x19, head=len(base), prefix=b"X")
+    if length_boundary:
+        exact_prefix = 0xffff-len(base)-4
+        packet(base, 0x20, prefix=bytes(exact_prefix), crc=True)
+        packet(base, 0x21, prefix=bytes(exact_prefix+1), crc=True)
+        packet(base, 0x22, prefix=bytes(0x1ffff), crc=True)
     for serial in range(amount):
         length = rng.randint(1, capacity)
         data = bytes(rng.randrange(256) for _ in range(length))
@@ -137,9 +143,10 @@ def main():
     parser.add_argument("--prefix", type=int, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--frames", type=int, default=240)
+    parser.add_argument("--length-boundary", action="store_true")
     args = parser.parse_args()
     build(args.directory,args.in_width,args.out_width,args.capacity,args.prefix,
-          args.seed,args.frames)
+          args.seed,args.frames,args.length_boundary)
 
 
 if __name__ == "__main__":

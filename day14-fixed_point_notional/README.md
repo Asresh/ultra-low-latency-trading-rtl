@@ -2,6 +2,9 @@
 
 Compute the gross amount of an order, its fee, and the cash amount. A fixed-point price represents an integer numerator scaled by `2**PRICE_FRAC`. This example shows where rounding occurs and why the hardware widens an addition before checking overflow.
 
+The optional [basket calculator](basket.md) combines individually rounded
+legs and checks the signed net debit or minimum proceeds of a package.
+
 ```mermaid
 flowchart LR
     A["Request<br/>price · quantity · fee rate"] --> P["Multiply<br/>32 × 32 → 64 bits"]

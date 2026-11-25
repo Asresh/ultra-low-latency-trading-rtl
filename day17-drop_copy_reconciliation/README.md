@@ -119,6 +119,12 @@ At 35 ns one primary and one copy observation with the same normalized key stage
 
 Run `make test-partitions`, `make formal-partitions`, and `make partition-waveform`. The tests compare every output bit with [the partition reference](drop_copy_partition_model.py) at one namespace with one set, three namespaces with four sets, and five namespaces with eight sets. Directed traces exercise identical cross-namespace keys, all three simultaneous input handshakes, invalid namespace management and reports, and incident clearing. The eight-step reduced formal check verifies the held diagnostic, epoch isolation, and persistent incident state. The shared output can transfer one diagnostic per edge. Size the downstream audit buffer for effective combined ingress and timeout activity.
 
+## Lossless investigation and exact replay
+
+[drop_copy_investigator.sv](drop_copy_investigator.sv) records accepted observations, targeted epoch changes, and diagnostic publication in the same chronological stream. An external recorder can backpressure the tap while timeout clocks continue. The independent replay tool reconstructs silent timeouts, compares every captured report, and verifies a terminal seal over the actual CRC-framed hardware bytes.
+
+See the [DCA1 investigation workflow, interface, and checked waveform](investigation.md). Run `make test-investigator` to reproduce the end-to-end checks across three namespace and set geometries.
+
 ## From the RTL simulation
 
 ![SystemVerilog drop-copy reconciliation showing a held staging report, successful pairing, and a quantity and price conflict](waveform.svg)

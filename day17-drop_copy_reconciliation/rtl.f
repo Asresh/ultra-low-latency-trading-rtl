@@ -1,2 +1,4 @@
 drop_copy_reconciliation.sv
 drop_copy_partitions.sv
+drop_copy_investigator.sv
+drop_copy_audit_frame.sv

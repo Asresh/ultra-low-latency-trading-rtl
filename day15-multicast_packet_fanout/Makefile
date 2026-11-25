@@ -9,16 +9,21 @@ TB := tb_multicast_packet_fanout.sv
 PROFILES := default odd solo
 IMAGES := $(addsuffix .vvp,$(addprefix build/,$(PROFILES)))
 SOURCES := fanout_model.py fanout_verify.py
+POLICY_RTL := $(shell cat rtl_policy.f)
 
-.PHONY: test lint synth formal waveform clean
+.PHONY: test test-policy lint synth formal waveform waveform-policy clean
 
-test: $(IMAGES)
+test: $(IMAGES) test-policy
 	$(PYTHON) -B fanout_verify.py example --image build/default.vvp --simulator "$(VVP)" --directory build/example
 	$(PYTHON) -B -m unittest -v test_fanout_audit
 	for profile in $(PROFILES); do \
 		$(PYTHON) -B fanout_verify.py check --profile $$profile --image build/$$profile.vvp --simulator "$(VVP)" --directory build/$$profile || exit 1; \
 		$(PYTHON) -B fanout_audit.py --profile $$profile build/$$profile/inputs.hex build/$$profile/observed.hex --output build/$$profile/audit.json || exit 1; \
 	done
+
+test-policy:
+	$(PYTHON) -B run_fanout_policy.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" --example
+	$(PYTHON) -B run_fanout_policy.py --iverilog "$(IVERILOG)" --vvp "$(VVP)"
 
 build/%.vvp: $(RTL) rtl.f $(TB) $(SOURCES)
 	mkdir -p build
@@ -27,11 +32,13 @@ build/%.vvp: $(RTL) rtl.f $(TB) $(SOURCES)
 
 lint:
 	$(VERILATOR) --lint-only -Wall --top-module multicast_packet_fanout -f rtl.f
+	$(VERILATOR) --lint-only -Wall --top-module multicast_policy_fanout -f rtl_policy.f
 
 synth:
 	mkdir -p build
 	$(YOSYS) -Q -T -l build/synth.log -q -p 'read_verilog -sv multicast_packet_fanout.sv; synth -top multicast_packet_fanout; check -assert; stat'
 	$(PYTHON) -c 'from pathlib import Path; print(Path("build/synth.log").read_text().rsplit("=== multicast_packet_fanout ===", 1)[-1].strip())'
+	$(YOSYS) -Q -T -l build/synth_policy.log -q -p 'read_verilog -sv $(POLICY_RTL); synth -top multicast_policy_fanout; check -assert; stat'
 
 formal: formal/formal_multicast_packet_fanout.sv $(RTL)
 	mkdir -p build
@@ -53,6 +60,22 @@ waveform: build/default.vvp ../scripts/render_vcd_waveform.py
 		--signal 'tb_multicast_packet_fanout.resident_slots=Live shared slots' \
 		--signal 'tb_multicast_packet_fanout.report_valid=Report valid' \
 		--signal 'tb_multicast_packet_fanout.report_status=Report status'
+
+waveform-policy: ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B run_fanout_policy.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" \
+		--example --wave build/policy/example/policy.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/policy/example/policy.vcd docs/policy_waveform.svg \
+		--start 34 --end 190 --title 'Day 15 · A required copy continues while a recorder holds credit' \
+		--signal 'tb_multicast_policy_fanout.clk=Clock' \
+		--signal 'tb_multicast_policy_fanout.s_tag=Ingress tag' \
+		--signal 'tb_multicast_policy_fanout.report_valid=Report valid' \
+		--signal 'tb_multicast_policy_fanout.report_tag=Report tag' \
+		--signal 'tb_multicast_policy_fanout.report_status=Report status' \
+		--signal 'tb_multicast_policy_fanout.report_epoch=Policy epoch' \
+		--signal 'tb_multicast_policy_fanout.report_enqueued=Copies committed' \
+		--signal 'tb_multicast_policy_fanout.report_no_credit=No-credit mask' \
+		--signal 'tb_multicast_policy_fanout.m_valid=Output valid mask' \
+		--signal 'tb_multicast_policy_fanout.m_ready=Output ready mask'
 
 clean:
 	rm -rf build obj_dir

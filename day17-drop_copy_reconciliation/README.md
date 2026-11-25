@@ -73,6 +73,52 @@ The packed key is `{epoch[15:0], venue[7:0], original_session[15:0], execution_i
 
 Default capacity is `SETS=4` for eight records including retained history. `SETS` must be a positive power of two. `WAIT_CYCLES=24` and `HISTORY_CYCLES=40` are positive integer cycle counts intended for the demonstration. Set them from measured source skew, maximum retained replay time and available capacity. Duplicates do not extend history. Events replayed after history has elapsed can stage as new, so retain durable audit state upstream or downstream across that boundary. Use a monotonically increasing epoch and a coordinated reset after reaching 65535. Ingress for one logical generation must use the same epoch on both lanes. The modular age contract requires a waiting entry to get sweep service before a complete 32-bit tick revolution elapses, including any stalled report or continuous configuration traffic.
 
+## Partitioned incidents and recovery
+
+[drop_copy_partitions.sv](drop_copy_partitions.sv) composes independent reconcilers behind a shared diagnostic port. Use a namespace for a recovery domain such as an account and its associated venue sessions. The primary and copy adapters supply the same namespace for paired observations. Both lanes may present identical normalized keys in different namespaces, and each ledger tracks its own outcome, generation and retained copies.
+
+```mermaid
+flowchart LR
+    P["Primary observations"] --> X["Decode namespace"]
+    C["Drop-copy observations"] --> X
+    E["Targeted epoch advance"] --> X
+    X --> N0["Namespace 0 ledger"]
+    X --> N1["Namespace 1 ledger"]
+    X --> N2["Namespace 2 ledger"]
+    X --> I["Invalid namespace mailbox"]
+    N0 --> A["Round-robin diagnostics"]
+    N1 --> A
+    N2 --> A
+    I --> A
+    N0 --> M["Per-namespace incident and telemetry"]
+    N1 --> M
+    N2 --> M
+    classDef entry fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef ledger fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef report fill:#fef3c7,stroke:#d97706,color:#451a03
+    class P,C,E,X entry
+    class N0,N1,N2 ledger
+    class I,A,M report
+```
+
+Each ingress channel adds a namespace field of `ceil(log2(NAMESPACES+1))` bits. The paired adapters select a namespace before the handshake and hold it with the key and payload under backpressure. One partition accepts at most one staged observation or maintenance operation per edge. The primary observation, copy observation, and targeted epoch command can all transfer on the same edge if each targets a distinct partition and has room. Each partition has `2*SETS` slots. A busy partition never consumes slots in another, though shared diagnostic backpressure can eventually fill every partition's report mailbox.
+
+| New output | Contract |
+| --- | --- |
+| `m_namespace` | Namespace of the diagnostic. Reports preserve local order. When different namespaces have results waiting, round robin selects the next report and retains that selection and payload through a stall. |
+| `active_epochs`, `pending_counts` | One epoch and waiting count per namespace, packed with namespace zero in the low bits. A successful restart clears only its target table, reports the number of abandoned observations and requires a strictly greater epoch. |
+| `namespace_incidents` | One sticky bit per namespace. A pair conflict, conflicting duplicate, missing observation or table-full diagnostic sets it even while another namespace owns the output. A valid targeted epoch advance or hardware reset clears it. Status only. Other observations continue to report during an incident. |
+| `namespace_metrics` | Ten 32-bit fields per namespace. From least significant to most significant within a namespace slice these are observed, matched, conflict, duplicate, missing, late, full, rejected, flushed and tick. Namespace zero occupies the low slice. |
+| `bad_namespace_count` | Saturating count of accepted invalid addresses. The separate error mailbox reports status 13 and preserves the rejected namespace, lane and raw key. Invalid observations retain their payload in `m_observed`. Invalid epoch commands embed the requested epoch in the key. |
+
+An invalid namespace shares one report mailbox. Invalid epoch controls have priority there, and competing invalid observation lanes alternate. Report arbitration can serve other namespaces while the error mailbox is occupied. A valid old-epoch observation reports the original `STALE_EPOCH` status within the target namespace. Software can use the incident bit to request reconciliation or isolate processing for a single account and venue grouping, then coordinate a local epoch advance with both adapters. In a gateway with multiple independent venue connections, this allows investigation of a mismatched fill on one connection while the other ledgers keep matching their own reports.
+
+![RTL waveform showing simultaneous intake, immediate incident visibility, and a targeted namespace restart](partition-waveform.svg)
+
+At 35 ns one primary and one copy observation with the same normalized key stage in namespaces 0 and 1. The output remains at namespace 0 while the audit sink is stalled. At 85 ns an unequal copy faults namespace 0. Its incident bit becomes visible while the audit output reports namespace 1. A rejected same-epoch request leaves the bit set. At 175 ns a valid epoch request moves namespace 0 to epoch 2 and clears its incident bit. Namespace 1 remains at epoch 0 and reports a duplicate at 215 ns. At the next targeted restart, namespace 2 advances independently while namespaces 0 and 1 each accept an observation.
+
+Run `make test-partitions`, `make formal-partitions`, and `make partition-waveform`. The tests compare every output bit with [the partition reference](drop_copy_partition_model.py) at one namespace with one set, three namespaces with four sets, and five namespaces with eight sets. Directed traces exercise identical cross-namespace keys, all three simultaneous input handshakes, invalid namespace management and reports, and incident clearing. The eight-step reduced formal check verifies the held diagnostic, epoch isolation, and persistent incident state. The shared output can transfer one diagnostic per edge. Size the downstream audit buffer for effective combined ingress and timeout activity.
+
 ## From the RTL simulation
 
 ![SystemVerilog drop-copy reconciliation showing a held staging report, successful pairing, and a quantity and price conflict](waveform.svg)
@@ -95,4 +141,4 @@ make waveform
 
 `make waveform` reruns the directed scenario and its independent capture check before rendering the SVG. Open the full `build/wave/reconcile.vcd` with a waveform viewer or inspect the expected and actual traces beside it.
 
-`make synth` checks the generic netlist. It provides a baseline for cell counts before FPGA placement. Throughput of one observation or maintenance operation per clock requires an accepting sink and depends on table contention. The parallel timeout scan and the combinational set selection increase fanout and logic as sets grow. An integration will also need PHY/protocol decoders, clock-domain crossings where appropriate, buffering sized for both sessions, recovery from feed gaps and an external audit store. The project implements a single-clock two-lane comparator and publishes simulation and synthesis evidence.
+`make synth` checks the generic netlist. It provides a baseline for cell counts before FPGA placement. Throughput of one observation or maintenance operation per clock requires an accepting sink and depends on table contention. The parallel timeout scan and the combinational set selection increase fanout and logic as sets grow. An integration will also need PHY/protocol decoders, clock-domain crossings where appropriate, buffering sized for both sessions, recovery from feed gaps and an external audit store. The project implements single-clock comparator and partitioned wrappers with simulation and synthesis evidence.

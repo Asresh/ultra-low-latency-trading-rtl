@@ -1,1 +1,2 @@
 drop_copy_reconciliation.sv
+drop_copy_partitions.sv

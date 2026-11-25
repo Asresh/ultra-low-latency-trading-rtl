@@ -7,6 +7,8 @@ payload remains live until its last subscriber finishes.
 
 The [subscriber-policy top](subscriber_policy.md) adds per-group mandatory and optional destinations, independent credit thresholds, versioned route snapshots, and explicit reports for partial delivery. The [checked waveform](docs/policy_waveform.svg) shows a slow recorder losing optional copies while a required consumer continues.
 
+The [sequenced replay journal](replay_journal.md) retains a bounded packet history and lets independent subscribers catch up or receive precise gap notices. Its [checked waveform](docs/replay_waveform.svg) shows a held packet surviving journal eviction while a healthy subscriber continues.
+
 ## Where it fits
 
 An FPGA market-data path can classify an incoming packet and send a copy of the

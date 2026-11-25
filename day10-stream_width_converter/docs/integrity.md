@@ -60,7 +60,7 @@ own stable fields. A valid frame's output can start once its audit record
 has been staged, even while the audit sink is stalled. A prolonged stall
 eventually fills the bounded storage and backpressures ingress.
 Synchronous reset discards both banks, pending audit records and partial
-checksum state.
+checksum state. Asserted reset suppresses packet and audit transfers.
 
 ## Simulation waveform
 

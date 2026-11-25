@@ -23,7 +23,7 @@ module integrity_gearbox #(
     output wire [OUT_BYTES-1:0]   m_keep,
     output wire                    m_last,
     output wire [15:0]             m_tag,
-    output logic                   audit_valid,
+    output wire                    audit_valid,
     input  wire                    audit_ready,
     output logic [15:0]            audit_tag,
     output logic [15:0]            audit_bytes,
@@ -34,7 +34,7 @@ module integrity_gearbox #(
 );
     localparam logic [2:0] OK = 0, BAD_LENGTH = 4, BAD_CRC = 5;
     localparam logic [31:0] CRC_RESET = 32'hffffffff;
-    logic open_packet;
+    logic open_packet, pending_audit;
     logic [31:0] crc_running, closed_crc, closed_expected_crc, packet_expected_crc;
     logic [15:0] packet_expected_bytes, closed_expected_bytes;
 
@@ -53,7 +53,7 @@ module integrity_gearbox #(
     wire [2:0] raw_audit_status;
     wire raw_ready = expect_data && (!allow_data || m_ready);
     wire pop = raw_valid && raw_ready && raw_last;
-    wire raw_audit_ready = !rst && (!audit_valid || audit_ready) &&
+    wire raw_audit_ready = !rst && (!pending_audit || audit_ready) &&
                            (raw_audit_status != OK || occupied < 2 || pop);
     wire take_report = raw_audit_valid && raw_audit_ready;
     wire push = take_report && raw_audit_status == OK;
@@ -91,6 +91,7 @@ module integrity_gearbox #(
         end
     end
 
+    assign audit_valid = !rst && pending_audit;
     assign m_valid = !rst && raw_valid && allow_data;
     assign m_data = m_valid ? raw_data : '0;
     assign m_keep = m_valid ? raw_keep : '0;
@@ -135,7 +136,7 @@ module integrity_gearbox #(
 
     always_ff @(posedge clk) begin
         if (rst) begin
-            audit_valid <= 0;
+            pending_audit <= 0;
             audit_tag <= '0;
             audit_bytes <= '0;
             audit_expected_bytes <= '0;
@@ -148,9 +149,9 @@ module integrity_gearbox #(
             write_pointer <= 0;
         end else begin
             if (audit_ready)
-                audit_valid <= 0;
+                pending_audit <= 0;
             if (take_report) begin
-                audit_valid <= 1;
+                pending_audit <= 1;
                 audit_tag <= raw_audit_tag;
                 audit_bytes <= raw_audit_bytes;
                 audit_expected_bytes <= closed_expected_bytes;

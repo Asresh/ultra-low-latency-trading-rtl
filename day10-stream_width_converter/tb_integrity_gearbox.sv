@@ -33,6 +33,7 @@ module tb_integrity_gearbox #(
     integer cycle = 0, consumed = 0, reports = 0, beats = 0, frames = 0;
     integer packet_stalls = 0, audit_stalls = 0, idle = 0;
     integer statuses [0:5];
+    logic check_stream = 1;
     logic packet_held = 0, audit_held = 0, accepted = 0, input_done = 0;
     logic [PACKET_W-1:0] previous_packet;
     logic [AUDIT_W-1:0] previous_audit;
@@ -44,6 +45,23 @@ module tb_integrity_gearbox #(
     logic [31:0] expected_crc, declared_crc;
     logic [2:0] expected_status;
     string directory, vcd;
+
+    task automatic hold_single_byte;
+        s_data = (IN_BYTES*8)'(8'h41);
+        s_keep = IN_BYTES'(1);
+        s_expected_bytes = 1;
+        s_expected_crc = 32'hd3d99e8b;
+        s_tag = 16'h5aa5;
+        s_valid = 1;
+        s_last = 1;
+        @(posedge clk);
+        if (!s_ready) $fatal(1, "one-byte test input did not accept");
+        @(negedge clk);
+        s_valid = 0;
+        while (!audit_valid || !m_valid) @(negedge clk);
+        if (audit_status != 0 || audit_tag != 16'h5aa5 || audit_crc != 32'hd3d99e8b)
+            $fatal(1, "bad one-byte audit");
+    endtask
 
     initial begin
         if (!$value$plusargs("tape=%s", directory))
@@ -83,14 +101,37 @@ module tb_integrity_gearbox #(
         if (rc != -1) $fatal(1,"output tape not drained");
         rc = $fscanf(audit_file,"%h",expected_tag);
         if (rc != -1) $fatal(1,"audit tape not drained");
+        check_stream = 0;
+        m_ready = 0;
+        audit_ready = 0;
+        hold_single_byte();
+        // A ready consumer must see no transfer on the reset edge.
+        rst = 1;
+        audit_ready = 1;
+        m_ready = 1;
+        #1;
+        if (audit_valid || m_valid || s_ready)
+            $fatal(1, "reset allowed a stale transfer");
+        @(negedge clk);
+        rst = 0;
+        audit_ready = 0;
+        m_ready = 0;
+        #1;
+        if (audit_valid || m_valid) $fatal(1, "reset retained committed output");
+        hold_single_byte();
         $display("PASS integrity %0d:%0d cap=%0d input=%0d reports=%0d frames=%0d beats=%0d stalls=%0d/%0d statuses=%0d,%0d,%0d,%0d,%0d,%0d",
                  IN_BYTES,OUT_BYTES,MAX_FRAME,consumed,reports,frames,beats,packet_stalls,audit_stalls,
                  statuses[0],statuses[1],statuses[2],statuses[3],statuses[4],statuses[5]);
         $finish;
     end
 
+    initial begin
+        #800000;
+        $fatal(1, "integrity test timeout");
+    end
+
     always @(posedge clk) begin
-        if (!rst) begin
+        if (!rst && check_stream) begin
             cycle <= cycle + 1;
             if (cycle >= 60000) $fatal(1,"integrity tape timeout");
             accepted <= s_valid && s_ready;

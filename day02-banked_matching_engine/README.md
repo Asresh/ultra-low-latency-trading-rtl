@@ -4,6 +4,10 @@ An FPGA RTL engine for independently matching multiple instruments on bounded ti
 
 The project also includes a [reserve-order and checkpoint engine](docs/reserve_matcher.md) with iceberg replenishment, self-trade prevention, fill-or-kill, and atomic per-instrument restore. Its [simulation waveform](docs/reserve_waveform.svg) shows a replenished maker losing priority to an older order at the same price.
 
+The reserve top also supports [owner-scoped order management](docs/order_management.md), including atomic post-only replace, read-only withdrawal preview, and mass cancel.
+
+The [call-auction engine](docs/call_auction.md) handles collared opening and reopening crosses. Its checked handoff transfers eligible auction residuals into a continuous reserve book through a verified checkpoint.
+
 | Default hardware | Value |
 | --- | ---: |
 | Independent instruments | 3 |

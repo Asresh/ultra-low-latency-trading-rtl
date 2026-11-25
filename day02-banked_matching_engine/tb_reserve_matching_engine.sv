@@ -38,6 +38,7 @@ module tb_reserve_matching_engine #(
     wire [IW-1:0] m_maker = m_result[RW-7-:IW];
     wire [QTY_W-1:0] m_quantity = m_result[RW-7-IW-PW-:QTY_W];
     wire m_refresh = m_result[4+IW+2*SW];
+    wire [IW-1:0] m_event_count = m_result[4+:IW];
 
     reserve_matching_engine #(
         .BANKS(BANKS), .PRICE_LEVELS(PRICE_LEVELS), .ORDER_SLOTS(ORDER_SLOTS),

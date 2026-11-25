@@ -24,15 +24,17 @@ RESERVE_PROFILES := default odd tiny
 
 .PHONY: all test legacy-test unit regress lint synth route report clean
 .PHONY: reserve-test reserve-regress reserve-unit reserve-demo lint-reserve synth-reserve formal-reserve waveform-reserve
+.PHONY: manage-demo waveform-management
+.PHONY: auction-test auction-example auction-bridge auction-lint auction-synth formal-auction waveform-auction
 all: test
 
-test: legacy-test reserve-test
+test: legacy-test reserve-test auction-test
 
 legacy-test: unit $(BUILD)/$(PROFILE)/engine.vvp
 	$(PYTHON) -B verify_matching.py run --profile $(PROFILE) --seed $(SEED) --commands $(COMMANDS) \
 		--vvp "$(VVP)" --sim $(BUILD)/$(PROFILE)/engine.vvp --build $(BUILD)/$(PROFILE)
 
-regress: reserve-regress
+regress: reserve-regress auction-test
 	$(MAKE) legacy-test PROFILE=default SEED=7201
 	$(MAKE) legacy-test PROFILE=default SEED=39119
 	$(MAKE) legacy-test PROFILE=wide SEED=9109
@@ -57,10 +59,10 @@ $(BUILD)/transport.vvp: matching_fifo.sv matching_arbiter.sv tb_matching_transpo
 	mkdir -p $(dir $@)
 	$(IVERILOG) -g2012 -Wall -s tb_matching_transport -o $@ $^
 
-lint: lint-reserve
+lint: lint-reserve auction-lint
 	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
 
-synth: synth-reserve
+synth: synth-reserve auction-synth
 	mkdir -p $(BUILD)
 	$(YOSYS) -Q -l $(BUILD)/synth.log -p 'read_verilog -sv $(RTL); synth -top $(TOP); check -assert; stat; write_json $(BUILD)/$(TOP).json'
 
@@ -70,13 +72,13 @@ $(RESERVE_BUILD)/%/engine.vvp: $(RESERVE_RTL) reserve_codes.svh $(RESERVE_TB).sv
 	$(IVERILOG) -g2012 -s $(RESERVE_TB) $$params -o $@ -f rtl_reserve.f $(RESERVE_TB).sv
 
 reserve-unit:
-	$(PYTHON) -B -m unittest -v test_reserve_model test_reserve_checkpoint
+	$(PYTHON) -B -m unittest -v test_reserve_model test_reserve_checkpoint test_reserve_management
 
-reserve-test: reserve-unit reserve-demo $(RESERVE_BUILD)/default/engine.vvp
+reserve-test: reserve-unit reserve-demo manage-demo $(RESERVE_BUILD)/default/engine.vvp
 	$(PYTHON) -B reserve_verify.py run --profile default --seed $(RESERVE_SEED) --commands $(RESERVE_COMMANDS) \
 		--vvp "$(VVP)" --sim $(RESERVE_BUILD)/default/engine.vvp --build $(RESERVE_BUILD)/default
 
-reserve-regress: reserve-unit reserve-demo $(foreach p,$(RESERVE_PROFILES),$(RESERVE_BUILD)/$(p)/engine.vvp)
+reserve-regress: reserve-unit reserve-demo manage-demo $(foreach p,$(RESERVE_PROFILES),$(RESERVE_BUILD)/$(p)/engine.vvp)
 	@set -e; for profile in $(RESERVE_PROFILES); do \
 		$(PYTHON) -B reserve_verify.py run --profile $$profile --seed $(RESERVE_SEED) --commands $(RESERVE_COMMANDS) \
 			--vvp "$(VVP)" --sim $(RESERVE_BUILD)/$$profile/engine.vvp --build $(RESERVE_BUILD)/$$profile; \
@@ -84,6 +86,24 @@ reserve-regress: reserve-unit reserve-demo $(foreach p,$(RESERVE_PROFILES),$(RES
 
 reserve-demo: $(RESERVE_BUILD)/default/engine.vvp
 	$(PYTHON) -B reserve_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/example
+
+manage-demo: $(RESERVE_BUILD)/default/engine.vvp
+	$(PYTHON) -B reserve_management_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/managed
+
+waveform-management: $(RESERVE_BUILD)/default/engine.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B reserve_management_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/managed-wave \
+		--waveform $(RESERVE_BUILD)/managed-wave/management.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(RESERVE_BUILD)/managed-wave/management.vcd docs/management_waveform.svg \
+		--start 170 --end 510 --title 'Day 02 · Priority-preserving replace and scoped withdrawal' \
+		--signal 'tb_reserve_matching_engine.clk=Clock' \
+		--signal 'tb_reserve_matching_engine.m_ready=Event ready' \
+		--signal 'tb_reserve_matching_engine.m_valid=Event valid' \
+		--signal 'tb_reserve_matching_engine.m_tag=Command tag' \
+		--signal 'tb_reserve_matching_engine.m_kind=Event kind' \
+		--signal 'tb_reserve_matching_engine.m_maker=Participating order ID' \
+		--signal 'tb_reserve_matching_engine.m_refresh=Priority renewed' \
+		--signal 'tb_reserve_matching_engine.m_event_count=Rank or row count' \
+		--signal 'tb_reserve_matching_engine.m_last=Terminal event'
 
 waveform-reserve: $(RESERVE_BUILD)/default/engine.vvp ../scripts/render_vcd_waveform.py
 	$(PYTHON) -B reserve_demo.py --vvp "$(VVP)" --sim $< --build $(RESERVE_BUILD)/waveform \
@@ -111,6 +131,44 @@ synth-reserve:
 formal-reserve:
 	mkdir -p $(RESERVE_BUILD)
 	cd formal && $(SBY) -f --prefix ../$(RESERVE_BUILD)/formal reserve.sby
+
+auction-test: auction-bridge
+	$(PYTHON) -B -m unittest -v test_auction_model
+	$(PYTHON) -B auction_verify.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" --build $(BUILD)/auction
+
+auction-example:
+	$(PYTHON) -B auction_verify.py --example --iverilog "$(IVERILOG)" --vvp "$(VVP)" --build $(BUILD)/auction
+
+auction-bridge: auction-example $(RESERVE_BUILD)/default/engine.vvp
+	$(PYTHON) -B auction_bridge_demo.py --capture $(BUILD)/auction/example/capture.txt \
+		--build $(BUILD)/auction/handoff --sim $(RESERVE_BUILD)/default/engine.vvp --vvp "$(VVP)"
+
+auction-lint:
+	$(VERILATOR) --lint-only -Wall --top-module call_auction_engine -f rtl_auction.f
+
+auction-synth:
+	mkdir -p $(BUILD)/auction
+	$(YOSYS) -Q -q -l $(BUILD)/auction/synth.log -p 'read_verilog -sv call_auction_engine.sv; synth -top call_auction_engine -noabc; check -assert; stat; write_json $(BUILD)/auction/netlist.json'
+	tail -n 24 $(BUILD)/auction/synth.log
+
+formal-auction:
+	mkdir -p $(BUILD)/auction
+	cd formal && $(SBY) -f --prefix ../$(BUILD)/auction/formal auction.sby
+
+waveform-auction: ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B auction_verify.py --example --iverilog "$(IVERILOG)" --vvp "$(VVP)" \
+		--build $(BUILD)/auction-wave --wave $(BUILD)/auction-wave/auction.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/auction-wave/auction.vcd docs/auction_waveform.svg \
+		--start 675 --end 850 --title 'Day 02 · Uniform-price uncross and residuals' \
+		--signal 'tb_call_auction_engine.clk=Clock' \
+		--signal 'tb_call_auction_engine.m_valid=Event valid' \
+		--signal 'tb_call_auction_engine.m_ready=Event ready' \
+		--signal 'tb_call_auction_engine.m_kind=Event kind' \
+		--signal 'tb_call_auction_engine.m_price=Clearing or limit tick' \
+		--signal 'tb_call_auction_engine.m_first=Buy or residual ID' \
+		--signal 'tb_call_auction_engine.m_second=Sell ID' \
+		--signal 'tb_call_auction_engine.m_quantity=Event quantity' \
+		--signal 'tb_call_auction_engine.m_last=Terminal event'
 
 route:
 	mkdir -p $(BUILD)

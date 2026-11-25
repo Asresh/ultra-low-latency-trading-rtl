@@ -10,6 +10,8 @@ import subprocess
 from reserve_model import Command, Event, Kind, PROFILES, Reject, ReserveMatcher, Result, unpack
 from reserve_workload import campaign
 
+MANAGEMENT_KINDS = (Kind.REPLACE, Kind.MASS_CANCEL, Kind.MASS_PREVIEW)
+
 
 @dataclass(frozen=True)
 class PinSample:
@@ -97,6 +99,10 @@ class Scoreboard:
                       "reset did not suppress interface handshakes")
         self.coverage["reset_edges"] += 1
         self.coverage["flushed_results"] += sum(len(queue) for queue in self.expected)
+        self.coverage["flushed_management_results"] += sum(
+            event.result.kind in MANAGEMENT_KINDS
+            for queue in self.expected for event, _ in queue
+        )
         self.reference.reset()
         for queue in self.expected:
             queue.clear()
@@ -137,6 +143,8 @@ class Scoreboard:
             self.sink_held = event
             self.pinned_lane = grant
             self.coverage["sink_stalls"] += 1
+            if event.result.kind in MANAGEMENT_KINDS:
+                self.coverage["management_stalls"] += 1
             return
         self.sink_held = None
         self.pinned_lane = None
@@ -146,8 +154,13 @@ class Scoreboard:
         if event.result.reason:
             self.reasons[Reject(event.result.reason).name] += 1
         self.coverage["accepted_results"] += 1
-        if event.result.refreshed:
+        if event.result.kind == Kind.FILL and event.result.refreshed:
             self.coverage["reserve_refreshes"] += 1
+        if event.result.kind == Kind.REPLACE:
+            key = "replaced_priority_renewed" if event.result.refreshed else "replaced_priority_kept"
+            self.coverage[key] += 1
+        if event.result.kind == Kind.MASS_CANCEL and not event.result.last:
+            self.coverage["mass_canceled_orders"] += 1
         if event.event_sequence == self.geometry.sequence_mask:
             self.coverage["event_wrap_boundaries"] += 1
         if event.result.last:
@@ -231,14 +244,18 @@ def require_coverage(summary, command_count, random_commands):
         raise CheckFailure(f"accepted {coverage['accepted_inputs']} of {command_count} inputs")
     for required in (
         Kind.STP_MAKER, Kind.STP_TAKER, Kind.FILL, Kind.ORDER, Kind.LEVEL,
-        Kind.SNAPSHOT, Kind.IMPORT,
+        Kind.SNAPSHOT, Kind.IMPORT, *MANAGEMENT_KINDS,
     ):
         if not summary["event_kinds"].get(required.name):
             raise CheckFailure(f"no transfer covered {required.name}")
     for required in (Reject.FOK, Reject.OWNER, Reject.POLICY, Reject.BANK, Reject.CROSSED):
         if not summary["rejections"].get(required.name):
             raise CheckFailure(f"no transfer covered rejection {required.name}")
-    for key in ("sink_stalls", "source_stalls", "reserve_refreshes"):
+    for key in (
+        "sink_stalls", "source_stalls", "reserve_refreshes", "replaced_priority_renewed",
+        "replaced_priority_kept", "mass_canceled_orders", "management_stalls",
+        "flushed_management_results",
+    ):
         if not coverage.get(key):
             raise CheckFailure(f"no samples for {key}")
     if random_commands > 600 and not coverage.get("flushed_results"):

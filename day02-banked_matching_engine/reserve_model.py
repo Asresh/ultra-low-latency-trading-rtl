@@ -12,6 +12,7 @@ class Operation(IntEnum):
     ORDER = 4
     SNAPSHOT = 5
     IMPORT = 6
+    MANAGE = 7
 
 
 class ImportPart(IntEnum):
@@ -19,6 +20,19 @@ class ImportPart(IntEnum):
     ROW = 1
     COMMIT = 2
     ABORT = 3
+
+
+class Management(IntEnum):
+    REPLACE = 0
+    CANCEL = 1
+    PREVIEW = 2
+
+
+class Scope(IntEnum):
+    OWNER = 0
+    SIDE = 1
+    LEVEL = 2
+    THROUGH = 3
 
 
 class TimeInForce(IntEnum):
@@ -47,6 +61,9 @@ class Kind(IntEnum):
     STP_TAKER = 9
     SNAPSHOT = 10
     IMPORT = 11
+    REPLACE = 12
+    MASS_CANCEL = 13
+    MASS_PREVIEW = 14
 
 
 class Reject(IntEnum):
@@ -346,6 +363,91 @@ class ReserveBook:
             visible=visible, peak=order.peak, **base,
         )]
 
+    def _replace(self, command):
+        """Amend an owned order in place. A price, size or display change may lose queue priority."""
+        oid = command.order_id
+        if oid >= self.geometry.slots:
+            return [Result.reject(Reject.ID)]
+        current = self.orders.get(oid)
+        if current is None:
+            return [Result.reject(Reject.ABSENT)]
+        if current.owner != command.owner:
+            return [Result.reject(Reject.OWNER)]
+        if (command.side, command.stp, command.import_visible) != (current.side, 0, 0):
+            return [Result.reject(Reject.POLICY)]
+        if command.price >= self.geometry.prices:
+            return [Result.reject(Reject.PRICE)]
+        if not command.quantity:
+            return [Result.reject(Reject.QUANTITY)]
+        if command.display > command.quantity and command.display != current.peak:
+            return [Result.reject(Reject.DISPLAY)]
+        if self._makers(command):
+            return [Result.reject(Reject.POST)]
+
+        renewed = (
+            command.price != current.price or command.display != current.peak
+            or command.quantity > current.total
+        )
+        rank = sum(row.time_priority < current.time_priority for row in self.orders.values())
+        revised = replace(
+            current, price=command.price, total=command.quantity, peak=command.display,
+            visible=first_slice(command.quantity, command.display) if renewed
+                    else min(current.visible, command.quantity),
+            time_priority=self._time() if renewed else current.time_priority,
+        )
+        self.orders[oid] = revised
+        return [Result(
+            Kind.REPLACE, side=revised.side, maker=oid, price=revised.price,
+            quantity=current.total, remaining=current.visible, total=revised.total,
+            visible=revised.visible, peak=revised.peak, owner=revised.owner,
+            refreshed=renewed, level_count=rank,
+        )]
+
+    @staticmethod
+    def _belongs(command, row):
+        if row.owner != command.owner:
+            return False
+        if command.stp == Scope.OWNER:
+            return True
+        if row.side != command.side:
+            return False
+        if command.stp == Scope.SIDE:
+            return True
+        if command.stp == Scope.LEVEL:
+            return row.price == command.price
+        if command.side:
+            return row.price <= command.price
+        return row.price >= command.price
+
+    def _mass_operation(self, command):
+        """Return exact owner-filtered rows and authoritative size totals."""
+        if (command.order_id or command.quantity or command.display or command.import_visible
+                or (command.stp == Scope.OWNER and command.side)
+                or (command.stp in (Scope.OWNER, Scope.SIDE) and command.price)):
+            return [Result.reject(Reject.POLICY)]
+        if command.price >= self.geometry.prices:
+            return [Result.reject(Reject.PRICE)]
+        mutate = command.tif == Management.CANCEL
+        kind = Kind.MASS_CANCEL if mutate else Kind.MASS_PREVIEW
+        rows = sorted(
+            ((key, row) for key, row in self.orders.items() if self._belongs(command, row)),
+            key=lambda item: item[1].time_priority,
+        )
+        results = []
+        for index, (oid, row) in enumerate(rows):
+            results.append(Result(
+                kind, last=False, side=row.side, maker=oid, price=row.price,
+                total=row.total, visible=row.visible, peak=row.peak, owner=row.owner, level_count=index,
+            ))
+            if mutate:
+                del self.orders[oid]
+        results.append(Result(
+            kind, owner=command.owner, level_count=len(rows),
+            level_total=sum(row.total for _, row in rows),
+            level_visible=sum(row.visible for _, row in rows),
+        ))
+        return results
+
     def _snapshot(self):
         """Report a finite ordered image followed by the authoritative row count."""
         image = sorted(self.orders.items(), key=lambda item: item[1].time_priority)
@@ -532,7 +634,8 @@ class ReserveBook:
     def execute(self, command):
         """Dispatch a valid-bank command and validate conservation on the result."""
         before = self.orders.copy()
-        if command.operation not in tuple(Operation):
+        if (command.operation not in tuple(Operation)
+                or (command.operation == Operation.MANAGE and command.tif not in tuple(Management))):
             results = [Result.reject(Reject.OPCODE)]
         elif command.operation == Operation.IMPORT:
             results = self._restore(command)
@@ -540,6 +643,9 @@ class ReserveBook:
             results = self._snapshot()
         elif self.staged is not None and command.operation not in (Operation.LEVEL, Operation.ORDER):
             results = [Result.reject(Reject.IMPORT)]
+        elif command.operation == Operation.MANAGE:
+            results = (self._replace(command) if command.tif == Management.REPLACE
+                       else self._mass_operation(command))
         elif command.operation == Operation.LEVEL:
             results = self._level(command)
         elif command.order_id >= self.geometry.slots:
@@ -554,6 +660,11 @@ class ReserveBook:
             assert sum(
                 result.quantity for result in results if result.kind != Kind.STP_MAKER
             ) == command.quantity
+        elif results[0].kind == Kind.MASS_PREVIEW:
+            assert before == self.orders
+        elif results[0].kind == Kind.MASS_CANCEL:
+            removed = {result.maker for result in results[:-1]}
+            assert self.orders == {key: row for key, row in before.items() if key not in removed}
         assert [result.last for result in results] == [False] * (len(results) - 1) + [True]
         self._invariants()
         return results

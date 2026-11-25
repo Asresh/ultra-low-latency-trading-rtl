@@ -67,6 +67,7 @@ Commands carry a bank and client tag outside the packed word. Results carry the 
 | 4 | Internal order query by ID and owner |
 | 5 | Stream an ordered per-bank snapshot |
 | 6 | Restore control. TIF selects begin (0), row (1), commit (2) or abort (3) |
+| 7 | [Owner-scoped order management](order_management.md). TIF selects replace, cancel or preview |
 
 Fill events report the maker ID, maker price, executed size and incoming remainder. The refill bit says whether the maker refreshed its visible quantity during this fill. Rest, reduce and order-query events report book row details. Cancel and cancel-maker report removed maker size. Cancel-taker and expiry report discarded incoming size. Snapshot, restore and rejection fields are documented with the [RTL encoder](../reserve_order_book.sv).
 
@@ -100,7 +101,7 @@ At 215 ns command `0x13` fills three units from maker 0 and replenishes its visi
 | --- | --- |
 | `make test` | Original matcher regression, reserve unit tests, hardware checkpoint round trip and default geometry simulation |
 | `make reserve-regress` | Default, five-bank odd geometry, and single-bank single-price geometry with depth-one queues |
-| `make formal-reserve` | 22-cycle bounded safety check on a three-slot bank and eight bounded reachability goals |
+| `make formal-reserve` | 22-cycle bounded safety check on a three-slot bank and twelve bounded reachability goals |
 | `make lint-reserve synth-reserve` | Strict Verilator lint and generic Yosys netlist checks |
 
 The reference uses a dictionary sorted by price and unbounded ages. The RTL uses direct ID slots and packed ages. The verifier compares all observed event fields while checking bank sequences, held ingress and egress, arbiter grants and reset flushes cycle by cycle. The checkpoint demo captures a populated bank, restores it into another bank in a fresh simulation, compares the snapshot rows, and proves the next same-price fills retain priority by checking the resulting event sequence. FPGA frequency, throughput under a particular network stack and compliance with a particular market's rulebook remain outside this test scope.

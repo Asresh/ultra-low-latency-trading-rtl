@@ -37,6 +37,8 @@ module reserve_order_book #(
     logic [OWNER_W-1:0] owner [0:ORDER_SLOTS-1];
     logic import_open;
     logic [ID_W-1:0] staged_count, staged_expected, snapshot_rank;
+    logic [ID_W-1:0] bulk_count, bulk_cursor;
+    logic [SUM_W-1:0] bulk_total, bulk_visible;
     logic [ORDER_SLOTS-1:0] staged_live;
     logic [ID_W-1:0] staged_age [0:ORDER_SLOTS-1];
     logic staged_side [0:ORDER_SLOTS-1];
@@ -63,6 +65,8 @@ module reserve_order_book #(
     logic [ID_W-1:0] level_orders;
     logic staged_crosses;
     logic [ADDR_W-1:0] snapshot_slot;
+    logic bulk_found;
+    logic [ADDR_W-1:0] bulk_slot;
 
     function automatic logic crosses_limit(
         input logic taker_side,
@@ -73,6 +77,26 @@ module reserve_order_book #(
         crosses_limit = (maker_side != taker_side) &&
             (taker_side ? maker_price >= limit : maker_price <= limit);
     endfunction
+
+    function automatic logic in_scope(
+        input logic [1:0] filter,
+        input logic row_side, requested_side,
+        input logic [PRICE_W-1:0] row_price, requested_price
+    );
+        case (filter)
+            `RM_SCOPE_OWNER: in_scope = 1'b1;
+            `RM_SCOPE_SIDE: in_scope = row_side == requested_side;
+            `RM_SCOPE_LEVEL: in_scope = row_side == requested_side && row_price == requested_price;
+            default: in_scope = row_side == requested_side &&
+                (requested_side ? row_price <= requested_price : row_price >= requested_price);
+        endcase
+    endfunction
+
+    wire bulk_fields_valid = id == 0 && remaining == 0 && display_peak == 0 && import_visible == 0 &&
+        (stp != `RM_SCOPE_OWNER || !command_side) &&
+        (stp > `RM_SCOPE_SIDE || limit_price == 0);
+    wire keeps_priority = price[slot] == limit_price && peak[slot] == display_peak &&
+        remaining <= total[slot];
 
     function automatic logic [QTY_W-1:0] open_slice(
         input logic [QTY_W-1:0] balance, maximum_display
@@ -93,11 +117,19 @@ module reserve_order_book #(
         level_orders = '0;
         staged_crosses = 1'b0;
         snapshot_slot = '0;
+        bulk_found = 1'b0;
+        bulk_slot = '0;
         for (integer i = 0; i < ORDER_SLOTS; i = i + 1) begin
             better_price = command_side ? price[i] > price[maker] : price[i] < price[maker];
             if (live[i]) begin
                 if (age[i] == snapshot_rank)
                     snapshot_slot = ADDR_W'(i);
+                if (owner[i] == account && in_scope(stp, side[i], command_side, price[i], limit_price) &&
+                    (tif != `RM_MASS_PREVIEW || age[i] >= bulk_cursor) &&
+                    (!bulk_found || age[i] < age[bulk_slot])) begin
+                    bulk_found = 1'b1;
+                    bulk_slot = ADDR_W'(i);
+                end
                 if (side[i] == command_side && price[i] == limit_price) begin
                     level_total = level_total + SUM_W'(total[i]);
                     level_visible = level_visible + SUM_W'(visible[i]);
@@ -159,7 +191,7 @@ module reserve_order_book #(
         event_level_total = '0;
         event_level_visible = '0;
 
-        if (operation > `RM_IMPORT) begin
+        if (operation == `RM_MANAGE && tif == 2'd3) begin
             reason = `RM_ERR_OPCODE;
         end else if (operation == `RM_SNAPSHOT) begin
             event_kind = `RM_EV_SNAPSHOT;
@@ -221,6 +253,61 @@ module reserve_order_book #(
             endcase
         end else if (import_open && operation != `RM_LEVEL && operation != `RM_ORDER) begin
             reason = `RM_ERR_IMPORT;
+        end else if (operation == `RM_MANAGE && tif == `RM_REPLACE) begin
+            if (id >= ID_W'(ORDER_SLOTS))
+                reason = `RM_ERR_ID;
+            else if (!live[slot])
+                reason = `RM_ERR_ABSENT;
+            else if (owner[slot] != account)
+                reason = `RM_ERR_OWNER;
+            else if (command_side != side[slot] || stp != 0 || import_visible != 0)
+                reason = `RM_ERR_POLICY;
+            else if (limit_price >= PRICE_W'(PRICE_LEVELS))
+                reason = `RM_ERR_PRICE;
+            else if (remaining == 0)
+                reason = `RM_ERR_QTY;
+            else if (display_peak > remaining && display_peak != peak[slot])
+                reason = `RM_ERR_DISPLAY;
+            else if (have_maker)
+                reason = `RM_ERR_POST;
+            else begin
+                event_kind = `RM_EV_REPLACE;
+                event_side = side[slot];
+                event_maker = id;
+                event_price = limit_price;
+                event_qty = total[slot];
+                event_remaining = visible[slot];
+                event_total = remaining;
+                event_visible = keeps_priority ?
+                    (visible[slot] < remaining ? visible[slot] : remaining) :
+                    open_slice(remaining, display_peak);
+                event_peak = display_peak;
+                event_owner = account;
+                event_refresh = !keeps_priority;
+                event_count = age[slot];
+            end
+        end else if (operation == `RM_MANAGE) begin
+            if (!bulk_fields_valid)
+                reason = `RM_ERR_POLICY;
+            else if (limit_price >= PRICE_W'(PRICE_LEVELS))
+                reason = `RM_ERR_PRICE;
+            else begin
+                event_kind = tif == `RM_MASS_CANCEL ? `RM_EV_MASS_CANCEL : `RM_EV_MASS_PREVIEW;
+                event_owner = account;
+                event_count = bulk_count;
+                if (bulk_found) begin
+                    event_last = 1'b0;
+                    event_side = side[bulk_slot];
+                    event_maker = ID_W'(bulk_slot);
+                    event_price = price[bulk_slot];
+                    event_total = total[bulk_slot];
+                    event_visible = visible[bulk_slot];
+                    event_peak = peak[bulk_slot];
+                end else begin
+                    event_level_total = bulk_total;
+                    event_level_visible = bulk_visible;
+                end
+            end
         end else if (operation == `RM_LEVEL) begin
             if (limit_price >= PRICE_W'(PRICE_LEVELS)) begin
                 reason = `RM_ERR_PRICE;
@@ -318,8 +405,12 @@ module reserve_order_book #(
         end
     end
 
-    wire [ADDR_W-1:0] current = event_kind == `RM_EV_CANCEL ? slot : maker;
+    wire bulk_row = !event_last &&
+        (event_kind == `RM_EV_MASS_CANCEL || event_kind == `RM_EV_MASS_PREVIEW);
+    wire [ADDR_W-1:0] current = event_kind == `RM_EV_CANCEL || event_kind == `RM_EV_REPLACE
+        ? slot : (bulk_row ? bulk_slot : maker);
     wire retire_order = event_kind == `RM_EV_CANCEL || event_kind == `RM_EV_STP_MAKER ||
+                        (event_kind == `RM_EV_MASS_CANCEL && bulk_row) ||
                         (event_kind == `RM_EV_FILL && event_total == '0);
 
     always_ff @(posedge clk) begin
@@ -333,12 +424,20 @@ module reserve_order_book #(
             staged_count <= '0;
             staged_expected <= '0;
             snapshot_rank <= '0;
+            bulk_count <= '0;
+            bulk_cursor <= '0;
+            bulk_total <= '0;
+            bulk_visible <= '0;
             {operation, tif, stp, command_side, id, limit_price,
              remaining, display_peak, import_visible, account} <= '0;
         end else if (s_valid && s_ready) begin
             active <= 1'b1;
             first_event <= 1'b1;
             snapshot_rank <= '0;
+            bulk_count <= '0;
+            bulk_cursor <= '0;
+            bulk_total <= '0;
+            bulk_visible <= '0;
             {operation, tif, stp, command_side, id, limit_price,
              remaining, display_peak, import_visible, account} <= s_command;
         end else if (m_valid && m_ready) begin
@@ -347,6 +446,12 @@ module reserve_order_book #(
             remaining <= event_remaining;
             if (event_kind == `RM_EV_SNAPSHOT && !event_last)
                 snapshot_rank <= snapshot_rank + 1'b1;
+            if (bulk_row) begin
+                bulk_count <= bulk_count + 1'b1;
+                bulk_cursor <= age[bulk_slot] + 1'b1;
+                bulk_total <= bulk_total + SUM_W'(event_total);
+                bulk_visible <= bulk_visible + SUM_W'(event_visible);
+            end
             if (event_kind == `RM_EV_IMPORT) begin
                 case (tif)
                     `RM_IMPORT_BEGIN: begin
@@ -404,6 +509,13 @@ module reserve_order_book #(
             end else if (event_kind == `RM_EV_REDUCE) begin
                 total[slot] <= event_total;
                 visible[slot] <= event_visible;
+            end else if (event_kind == `RM_EV_REPLACE) begin
+                total[slot] <= event_total;
+                visible[slot] <= event_visible;
+                peak[slot] <= event_peak;
+                price[slot] <= event_price;
+                if (event_refresh)
+                    age[slot] <= live_count - 1'b1;
             end else if (event_kind == `RM_EV_REST) begin
                 live[slot] <= 1'b1;
                 live_count <= live_count + 1'b1;

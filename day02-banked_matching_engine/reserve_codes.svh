@@ -12,6 +12,14 @@
 `define RM_IMPORT_ROW     2'd1
 `define RM_IMPORT_COMMIT  2'd2
 `define RM_IMPORT_ABORT   2'd3
+`define RM_MANAGE        3'd7
+`define RM_REPLACE       2'd0
+`define RM_MASS_CANCEL   2'd1
+`define RM_MASS_PREVIEW  2'd2
+`define RM_SCOPE_OWNER   2'd0
+`define RM_SCOPE_SIDE    2'd1
+`define RM_SCOPE_LEVEL   2'd2
+`define RM_SCOPE_THROUGH 2'd3
 
 `define RM_GTC            2'd0
 `define RM_IOC            2'd1
@@ -34,6 +42,9 @@
 `define RM_EV_STP_TAKER   4'd9
 `define RM_EV_SNAPSHOT    4'd10
 `define RM_EV_IMPORT      4'd11
+`define RM_EV_REPLACE     4'd12
+`define RM_EV_MASS_CANCEL 4'd13
+`define RM_EV_MASS_PREVIEW 4'd14
 
 `define RM_ERR_ID         4'd1
 `define RM_ERR_PRICE      4'd2

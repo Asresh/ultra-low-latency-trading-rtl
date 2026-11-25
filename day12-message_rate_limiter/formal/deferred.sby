@@ -1,0 +1,26 @@
+[tasks]
+safety
+cover
+
+[options]
+safety: mode bmc
+safety: depth 14
+cover: mode cover
+cover: depth 16
+
+[engines]
+smtbmc boolector
+
+[script]
+read -formal -D FORMAL_DEFERRED -sv rate_refill.sv eager_rate_bucket.sv deferred_rate_scheduler.sv
+chparam -set GROUPS 1 -set SESSIONS 2 -set DEPTH 2 -set TOKEN_W 3 -set TTL_W 2 -set TAG_W 2 -set DATA_W 2 deferred_rate_scheduler
+prep -top deferred_rate_scheduler
+flatten
+memory_map
+opt
+
+[files]
+../rate_refill.sv
+../eager_rate_bucket.sv
+../deferred_rate_scheduler.sv
+deferred_properties.svh

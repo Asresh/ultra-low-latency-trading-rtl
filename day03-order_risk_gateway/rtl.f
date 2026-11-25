@@ -1,3 +1,5 @@
 hft_order_risk_gateway.sv
 risk_audit_tap.sv
 risk_audit_serializer.sv
+risk_portfolio_ledger.sv
+risk_portfolio_gateway.sv

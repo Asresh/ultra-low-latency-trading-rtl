@@ -139,7 +139,74 @@ Configure buy key `(account=0, instrument=0, side=0)` with a collar of 10–50, 
 
 For [audit_trace.py](audit_trace.py), the testbench packs the reply fields in the order listed by `Decision` in [risk_model.py](risk_model.py). The capture uses one eight-digit hexadecimal word per line. The host verifies CRC, payload width, sequence, and optional expected decisions. It also accepts binary little-endian captures.
 
-## Run
+## Optional account and firm portfolio limits
+
+Use [risk_portfolio_gateway.sv](risk_portfolio_gateway.sv) when several instruments or sides share one risk budget. It wraps the original order gateway and tracks gross reserved notional, open-order count, and execution turnover across all the keys owned by an account and across the firm. Gross reservation adds both sides without offsetting them. The usage limit compares gross reservation plus execution turnover in the current epoch.
+
+### Where it fits
+
+- **A shared budget across strategy instances.** Account 0 has 100 reserved in buy orders on instrument A and 40 in sell orders on instrument B. Under an account gross cap of 150, a new reservation of 10 meets the cap exactly, while a new reservation of 20 is denied. Each per-key ledger can remain within its own native cap throughout.
+- **Independent accounts sharing a firm-wide cap.** If account 0 reserves 140 and account 1 reserves 20, firm gross is 160. An exposure-increasing order for account 1 can meet its own cap and still be blocked by the firm policy. A subsequent cancel frees capacity without consuming execution turnover.
+- **Recovery after a limit change.** Lowering the account cap beneath existing exposure leaves live orders intact. A fill or cancel still reconciles at the native gateway. A reduction can proceed through the portfolio checks while new orders and amendments increasing exposure are subject to the lowered ceilings.
+
+The account and overall scopes reflect why aggregate pre-order credit checks matter. Integrators choose a common notional unit, apply any currency conversion upstream, and establish the boundaries of the trading epoch. [SEC market-access risk controls](https://www.sec.gov/files/rules/final/2010/34-63241_0.pdf)
+
+```mermaid
+flowchart LR
+    Request["Normalized order or execution"] --> Guard["Account and firm projection"]
+    Guard -->|"Allowed or native validation required"| Native["Native risk gateway"]
+    Guard -->|"Cap denial requests read-only snapshot"| Native
+    Native --> Receipt["Ordered receipt"]
+    Native -->|"Successful state change"| Mirror["Slot mirror and aggregate ledgers"]
+    Mirror --> Guard
+    Control["Set caps, read, or advance epoch"] --> Mirror
+    classDef in fill:#dbeafe,stroke:#1d4ed8,color:#172554
+    classDef state fill:#d1fae5,stroke:#15803d,color:#052e16
+    classDef inspect fill:#ede9fe,stroke:#6d28d9,color:#2e1065
+    class Request,Control in
+    class Guard,Native,Mirror state
+    class Receipt inspect
+```
+
+### Commands and results
+
+The order input and native policy command retain the field meanings documented above. The separate portfolio control path has ready/valid pins `ctl_valid/ctl_ready` and `ctl_m_valid/ctl_m_ready`. A native policy command takes priority over a portfolio control command, followed by an order request. Only one command may occupy the wrapper at a time. Either stalled response blocks further commands until its handshake. Configuration and epoch commands have a total order relative to orders and executions.
+
+| Control field | Behavior |
+| --- | --- |
+| `ctl_op=0` | Replace all three check enables and caps for the selected scope. |
+| `ctl_op=1` | Capture cap values, gross, turnover, order count, and current epoch for the selected scope. |
+| `ctl_op=2` | Advance the firm-wide epoch. The unsigned 32-bit value must strictly increase. This clears turnover in both scopes and keeps all live reservations and configured caps. |
+| `ctl_firm / ctl_account` | Select account when firm is 0. Select firm with account field zero when firm is 1. |
+| `ctl_mask[2:0]` | Enable usage, order count, and gross checks, respectively. An enabled zero cap permits no positive exposure in that dimension. A disabled dimension reads back zero. |
+| `ctl_m_status` | 0 OK, 1 malformed scope, 2 enabled order-count cap out of range, 3 unchanged or decreasing epoch, 4 reserved opcode. |
+
+An exposure-increasing NEW or AMEND is checked only after valid shape, slot ownership, generation, and event sequencing establish it as an admission candidate. The six portfolio checks run account first, then firm. Within each scope, priority is gross, then count, then usage. A portfolio denial returns native-format status 22 and `m_portfolio_reason=1..6` in that order. It obtains the native reply fields with an internal read-only snapshot. A reason of zero means the response followed native semantics, including native reconciliation errors. An already latched halt takes priority. If halt arrives while a denied snapshot is pending, the held decision reports `HALTED`. A native authorization committed before a later halt remains an already committed authorization.
+
+The overlay checks increasing reservation before native per-key admission, so a structurally valid request may return a portfolio cap reason even if it would also cross a native key limit. Any request that passes this overlay still faces native per-key, order-shape, and halt checks. Risk-reducing AMEND reaches native admission. FILL, CANCEL, and REJECT always reach native lifecycle checks. The wrapper changes aggregate state only on a successful mutating native reply. For each reply, `m_native` uses the packed wire field order in `Decision`; the extra ports report updated account and firm totals and the observed epoch. With invalid account encoding, the account fields are zero and the firm fields still show the current scope.
+
+Each native per-key amount has `PRICE_W + QTY_W` bits. Portfolio amount fields add `ceil(log2(ORDER_SLOTS + 2*NUM_ACCOUNTS*NUM_INSTRUMENTS + 1))` bits, bounding the sum of all slot reservations and all cumulative native execution ledgers. Portfolio rollover affects only the derived epoch totals. The legacy gateway retains its per-key cumulative execution guard and generation counters until reset.
+
+In the standalone wrapper, an order handshake at rising edge `n` advances portfolio cap checking at `n+1`, enters the native gateway at `n+2`, and commits there at `n+5`. The wrapper records aggregate state and exposes its receipt after `n+6`. With a ready consumer the earliest receipt transfer is `n+7`. These are simulation cycle positions. The serialized wrapper is intended for integration where account-wide enforcement matters and one command can hold the interface until its result transfers.
+
+### Checked waveform and capture replay
+
+![Portfolio gateway holds a cap rejection and preserves the account reservation](portfolio-waveform.svg)
+
+The NEW at 275 ns reserves 100 (`0x64`). AMEND at 435 ns proposes 200, so its receipt at 495 ns carries reason `0x1` and leaves account and firm gross unchanged. A later reduction bypasses the tightened portfolio cap and the native engine commits gross 80 (`0x50`).
+
+```sh
+make test-portfolio-journal
+make formal-portfolio
+make portfolio-waveform
+python3 -B portfolio_journal.py check build/portfolio-narrow/recovery.jsonl
+```
+
+The independent oracle recomputes gross from live slot objects. The exact-match test covers **2,692 receipts** across narrow, wide, and singleton geometries, including **5,125** held order-reply cycles and **1,990** held control-reply cycles. It exercises forgotten generations, cumulative turnover past a ceiling, inclusive limit boundaries, rollover with live reservations, and a wide cross-key aggregate that exceeds one native amount. The 15-edge bounded formal run checks stable held replies, ordered accounting bounds, and monotonic epochs. This run uses two accounts and two slots. Generic synthesis and strict Verilator lint run for the portfolio top alongside the original tests.
+
+`portfolio_journal.py seal` replays the simulator's input and observed pin records independently before linking them in a checksummed journal. `snapshot` validates the journal and produces an operator-readable state inventory. `export-stimulus` validates before recreating the complete normalized replay. The regression replays that exported capture through RTL and compares the resulting bytes. Fault tests cover altered receipts, rehashed false outcomes, insertion, tail truncation with a separately supplied terminal digest, and atomic output cleanup. Production recovery still needs an external durable recorder, authenticated checkpoint provenance, and a replay mode whose output is restricted from venue submission.
+
+## Run the original gateway
 
 Use Icarus Verilog and Python 3 for the regression and audit reader. Use Verilator and Yosys for lint and synthesis.
 

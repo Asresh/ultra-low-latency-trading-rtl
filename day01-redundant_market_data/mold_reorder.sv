@@ -4,7 +4,9 @@ module mold_reorder #(
     parameter integer MESSAGE_BYTES = 64,
     parameter integer WINDOW = 16,
     parameter integer GAP_TICKS = 64,
-    parameter integer REQUEST_MAX = 32
+    parameter integer REQUEST_MAX = 32,
+    parameter integer MAX_REQUESTS_PER_HEAD = 0,
+    parameter integer RETRY_BACKOFF_SHIFT = 0
 ) (
     input  logic                        clk,
     input  logic                        clear,
@@ -42,7 +44,7 @@ module mold_reorder #(
 );
     localparam logic [2:0] DATA = 3'd0, HEARTBEAT = 3'd1, END_SESSION = 3'd2;
     localparam integer SLOT_BITS = $clog2(WINDOW);
-    localparam integer TIMER_BITS = $clog2(GAP_TICKS+1);
+    localparam integer TIMER_BITS = $clog2(GAP_TICKS+1) + RETRY_BACKOFF_SHIFT;
     localparam integer RECORD_BITS = 16 + MESSAGE_BYTES*8;
     localparam logic [63:0] HALF_RANGE = 64'h8000_0000_0000_0000;
 
@@ -132,6 +134,32 @@ module mold_reorder #(
         end
     end
 
+    wire retry_permitted;
+    wire [TIMER_BITS-1:0] retry_ticks;
+    if (MAX_REQUESTS_PER_HEAD == 0 && RETRY_BACKOFF_SHIFT == 0) begin : unlimited
+        assign retry_permitted = 1'b1;
+        assign retry_ticks = TIMER_BITS'(GAP_TICKS);
+    end else begin : retry_policy
+        localparam integer LIMIT = MAX_REQUESTS_PER_HEAD > RETRY_BACKOFF_SHIFT ?
+                                  MAX_REQUESTS_PER_HEAD : RETRY_BACKOFF_SHIFT;
+        localparam integer ATTEMPT_W = $clog2(LIMIT+1);
+        logic [ATTEMPT_W-1:0] attempts;
+        wire [ATTEMPT_W-1:0] shift_amount = attempts >= ATTEMPT_W'(RETRY_BACKOFF_SHIFT) ?
+                                          ATTEMPT_W'(RETRY_BACKOFF_SHIFT) : attempts;
+
+        assign retry_permitted = MAX_REQUESTS_PER_HEAD == 0 ||
+                                 attempts < ATTEMPT_W'(MAX_REQUESTS_PER_HEAD);
+        assign retry_ticks = TIMER_BITS'(GAP_TICKS) << shift_amount;
+
+        always_ff @(posedge clk) begin
+            if (clear || release_head)
+                attempts <= '0;
+            else if (request_valid && request_ready && request_sequence == expected_sequence &&
+                     attempts < ATTEMPT_W'(LIMIT))
+                attempts <= attempts + 1'b1;
+        end
+    end
+
     always_ff @(posedge clk) begin
         if (clear) begin
             request_valid    <= 1'b0;
@@ -143,9 +171,9 @@ module mold_reorder #(
                 request_valid <= 1'b0;
                 idle_ticks    <= '0;
             end
-        end else if (!gap_pending || (hit_store && target_slot == head_slot)) begin
+        end else if (!gap_pending || !retry_permitted || (hit_store && target_slot == head_slot)) begin
             idle_ticks <= '0;
-        end else if (idle_ticks == TIMER_BITS'(GAP_TICKS-1)) begin
+        end else if (idle_ticks == retry_ticks - 1'b1) begin
             request_valid    <= 1'b1;
             request_sequence <= expected_sequence;
             request_count    <= next_request_count;

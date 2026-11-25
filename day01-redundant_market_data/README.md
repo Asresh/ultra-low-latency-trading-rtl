@@ -4,6 +4,8 @@ A dual-feed Nasdaq MoldUDP64 receiver that turns UDP payload bytes into one orde
 
 The top level is [`redundant_market_data.sv`](redundant_market_data.sv). [`rtl.f`](rtl.f) lists the synthesizable sources in dependency order.
 
+The [multi-session receiver and recovery archive](docs/multisession.md) extend this block with isolated session slots, epoch-fenced replacement, independently paced recovery requests and a checked hardware–software repair loop.
+
 ## Run
 
 ```sh
@@ -12,9 +14,12 @@ make test-default
 make regress
 make lint
 make synth
+make formal
 ```
 
 Simulation uses Icarus Verilog and the Python standard library. Use Verilator for RTL lint and Yosys for generic synthesis and structural checks. The build directory holds generated vectors, the simulator and synthesis output. The generic netlist expands memories into registers. Use the repository's device mapping flow for FPGA resources and timing.
+
+`make regress` checks the single-session core and the multi-session extension. `make synth` checks both synthesis tops, and `make waveform` reproduces both diagrams.
 
 ## Data path
 
@@ -130,6 +135,10 @@ Counters saturate at 2³²−1. Index 2 is a subset of index 1. The winner remai
 At small test geometry, the Icarus benchmark injected identical 41-byte one-Delete datagrams on both lanes for **six consecutive simultaneous input beats** and saw the event transfer **15 clocks after both last beats**, or 20 clocks from the first beats. Sources and sink ran without bubbles. While a free bank is assigned, each lane accepts up to one 64-bit beat per clock, and both lane interfaces can operate in the same cycle.
 
 For the measured path the final-to-event stages were three clocks for header and block validation, seven for descriptor and RAM replay through bank acceptance, one for handing off the reorder head, three for the ITCH input beats and one for event transfer. Longer packets require two validation clocks per block after the header. Ingress must wait when both banks are busy. Sustained throughput depends on block length and count, arbitration occupancy, recovery, and downstream stalls. The isolated burst test does not establish a sustained Ethernet line rate.
+
+## Guarded retransmission return
+
+The optional recovery transport guard qualifies entire reply datagrams against a slot, epoch, live request and coverage map before they can rejoin the receiver. It includes a request dispatcher, independent audit output, and packet-level arbitration with live lane B. The closed-loop test captures real requests, retrieves the original wire bytes from the archive, injects faults, and checks repaired events. [Recovery guard integration and waveform](docs/recovery-guard.md)
 
 ## Verification and replay
 

@@ -152,6 +152,10 @@ The bundle test verifies the manifest and TRP checksums, writes complete partiti
 
 In this simulation the first run starts at 165 ns and holds its first beat from 175 ns. The second bank accepts its own write and becomes reserved at 195 ns while the first is active. The pending release waits while the sink keeps ready low. At 345 ns, the held beat finally transfers. At 355 ns, the old run retires with its packet truncation flag and the second run becomes the owner. The second bank offers its first beat at 365 ns.
 
+## Deterministic replay impairment
+
+The optional packet stage schedules reproducible delay and jitter, drops, duplicate copies and controlled byte corruption. It integrates with the banked replayer and retains packet identity and timing while a sink stalls. The hardware and host audit are tested with CRC-checked TRP tapes. [Rule format, integration and waveform](replay-impairment.md)
+
 ## Make your own replay tape
 
 Create `build/packets.csv` with a header and exact decimal nanosecond timestamps. The payload field is unseparated hexadecimal.

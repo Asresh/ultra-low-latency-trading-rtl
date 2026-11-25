@@ -1,0 +1,24 @@
+[tasks]
+safety
+examples
+
+[options]
+safety: mode bmc
+safety: depth 15
+examples: mode cover
+examples: depth 18
+
+[engines]
+safety: abc bmc3
+examples: smtbmc z3
+
+[script]
+plugin -i slang
+read_slang --top replay_impairment -GRULES=1 -GQUEUE_DEPTH=1 -GMAX_BEATS=2 -GRUN_W=2 -GREV_W=2 replay_impairment_rules.sv replay_impairment.sv
+read -formal -sv formal_replay_impairment.sv
+prep -top formal_replay_impairment
+
+[files]
+../replay_impairment_rules.sv
+../replay_impairment.sv
+formal_replay_impairment.sv

@@ -12,6 +12,9 @@ GUARD_RTL := $(shell cat recovery_guard.f)
 GUARD_AUX := $(filter-out mold_pair_ram.sv,$(GUARD_RTL))
 GUARD_HEADER := mold_recovery_codes.svh
 GUARD_TB := tb_mold_recovery_guard
+SNAPSHOT_RTL := $(shell cat snapshot.f)
+SNAPSHOT_TB := tb_mold_snapshot_cutover
+SNAPSHOT_SCOPE := tb_snapshot_receiver_demo
 
 .PHONY: all test test-default test-multisession test-recovery-loop test-retry-policy icarus regress lint synth synth-multisession synth-retry-policy formal clean
 all: test
@@ -43,6 +46,7 @@ regress:
 	$(MAKE) test-recovery-loop
 	$(MAKE) test-retry-policy
 	$(MAKE) test-recovery-guard
+	$(MAKE) test-snapshot
 
 $(BUILD)/multisession.vvp: $(RTL) $(MULTI_RTL) rtl.f multisession.f tb_multisession_market_data.sv
 	mkdir -p $(BUILD)
@@ -71,12 +75,12 @@ test-retry-policy: $(BUILD)/retry-scheduler.vvp $(BUILD)/multisession-bounded.vv
 	$(VVP) $(BUILD)/retry-scheduler.vvp
 	$(VVP) $(BUILD)/multisession-bounded.vvp +vectors=$(BUILD)/multisession-98741.txt
 
-lint: lint-recovery-guard
+lint: lint-recovery-guard lint-snapshot
 	$(VERILATOR) --lint-only --Wall --top-module redundant_market_data -f rtl.f
 	$(VERILATOR) --lint-only --Wall --top-module multisession_market_data -f rtl.f -f multisession.f
 	$(VERILATOR) --lint-only --Wall --top-module mold_reorder -GMAX_REQUESTS_PER_HEAD=4 -GRETRY_BACKOFF_SHIFT=2 mold_reorder.sv
 
-synth: synth-multisession synth-retry-policy synth-recovery-guard
+synth: synth-multisession synth-retry-policy synth-recovery-guard synth-snapshot
 	mkdir -p $(BUILD)
 	$(YOSYS) -ql $(BUILD)/synth.log -p 'read_verilog -sv $(RTL); synth -top redundant_market_data -noabc; check -assert; stat; write_json $(BUILD)/market_data.json'
 	tail -n 24 $(BUILD)/synth.log
@@ -90,7 +94,7 @@ synth-retry-policy:
 	mkdir -p $(BUILD)
 	$(YOSYS) -ql $(BUILD)/retry-policy-synth.log -m slang -p 'read_slang --top mold_reorder -GGAP_TICKS=4 -GMAX_REQUESTS_PER_HEAD=4 -GRETRY_BACKOFF_SHIFT=2 mold_reorder.sv; synth -top mold_reorder -noabc; check -assert; stat'
 
-formal: formal-recovery-guard
+formal: formal-recovery-guard formal-snapshot
 	mkdir -p $(BUILD)
 	cd formal && $(SBY) -f --prefix ../$(BUILD)/session session.sby
 
@@ -99,7 +103,7 @@ clean:
 
 .PHONY: waveform waveform-multisession waveform-retry-policy waveform-recovery-guard
 
-waveform: build/market_data.vvp ../scripts/render_vcd_waveform.py waveform-multisession waveform-retry-policy waveform-recovery-guard
+waveform: build/market_data.vvp ../scripts/render_vcd_waveform.py waveform-multisession waveform-retry-policy waveform-recovery-guard waveform-snapshot
 	$(PYTHON) -B scenarios.py --output $(BUILD)/waveform --seed 7201
 	$(VVP) $< +vectors=$(BUILD)/waveform +waveform=$(BUILD)/redundant_market_data.vcd
 	mkdir -p docs
@@ -201,3 +205,60 @@ waveform-recovery-guard: $(BUILD)/recovery-guard.vvp ../scripts/render_vcd_wavef
 		--signal '$(GUARD_TB).replay_valid=Replay Valid' \
 		--signal '$(GUARD_TB).replay_ready=Replay Ready' \
 		--signal '$(GUARD_TB).dut.leases.replay_fence=Same-slot Epoch Fence'
+
+.PHONY: test-snapshot test-snapshot-demo lint-snapshot synth-snapshot formal-snapshot waveform-snapshot
+
+$(BUILD)/snapshot-cutover.vvp: $(SNAPSHOT_TB).sv $(SNAPSHOT_RTL) snapshot.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -s $(SNAPSHOT_TB) -o $@ -f snapshot.f $<
+
+$(BUILD)/snapshot-single.vvp: $(SNAPSHOT_TB).sv $(SNAPSHOT_RTL) snapshot.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -s $(SNAPSHOT_TB) -P$(SNAPSHOT_TB).DELTAS=1 -o $@ -f snapshot.f $<
+
+$(BUILD)/snapshot-default.vvp: $(SNAPSHOT_TB).sv $(SNAPSHOT_RTL) snapshot.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -s $(SNAPSHOT_TB) -P$(SNAPSHOT_TB).EPOCH_W=16 -P$(SNAPSHOT_TB).WAIT_W=16 \
+		-P$(SNAPSHOT_TB).DELTAS=8 -P$(SNAPSHOT_TB).MAX_ROWS=16 -o $@ -f snapshot.f $<
+
+$(BUILD)/snapshot-demo.vvp: $(SNAPSHOT_SCOPE).sv $(RTL) $(MULTI_RTL) $(SNAPSHOT_RTL) rtl.f multisession.f snapshot.f
+	mkdir -p $(BUILD)
+	$(IVERILOG) -g2012 -s $(SNAPSHOT_SCOPE) -o $@ -f rtl.f -f multisession.f -f snapshot.f $<
+
+test-snapshot: $(BUILD)/snapshot-cutover.vvp $(BUILD)/snapshot-single.vvp $(BUILD)/snapshot-default.vvp test-snapshot-demo
+	$(PYTHON) -B -m unittest test_snapshot_image
+	$(PYTHON) -B gen_snapshot_cutover_vectors.py $(BUILD)/snapshot-cutover.txt
+	$(VVP) $< +vectors=$(BUILD)/snapshot-cutover.txt
+	$(PYTHON) -B gen_snapshot_cutover_vectors.py $(BUILD)/snapshot-single.txt --depth 1 --seed 7923
+	$(VVP) $(BUILD)/snapshot-single.vvp +vectors=$(BUILD)/snapshot-single.txt
+	$(PYTHON) -B gen_snapshot_cutover_vectors.py $(BUILD)/snapshot-default.txt --default --seed 81193
+	$(VVP) $(BUILD)/snapshot-default.vvp +vectors=$(BUILD)/snapshot-default.txt
+
+test-snapshot-demo: $(BUILD)/snapshot-demo.vvp
+	$(PYTHON) -B snapshot_cutover_demo.py build $(BUILD)/snapshot-demo
+	$(VVP) $< +out=$(BUILD)/snapshot-demo
+	$(PYTHON) -B snapshot_cutover_demo.py check $(BUILD)/snapshot-demo
+
+lint-snapshot:
+	$(VERILATOR) --lint-only -Wall --top-module mold_snapshot_cutover -f snapshot.f
+
+synth-snapshot:
+	mkdir -p $(BUILD)
+	$(YOSYS) -ql $(BUILD)/snapshot-synth.log -m slang -p 'read_slang --top mold_snapshot_cutover $(SNAPSHOT_RTL); synth -top mold_snapshot_cutover -noabc; check -assert; stat'
+
+formal-snapshot:
+	mkdir -p $(BUILD)
+	cd formal && $(SBY) -f --prefix ../$(BUILD)/formal-snapshot snapshot_cutover.sby
+
+waveform-snapshot: $(BUILD)/snapshot-demo.vvp
+	$(PYTHON) -B snapshot_cutover_demo.py build $(BUILD)/snapshot-wave
+	$(VVP) $< +out=$(BUILD)/snapshot-wave +waves=$(BUILD)/snapshot-wave/native.vcd
+	$(PYTHON) -B snapshot_cutover_demo.py check $(BUILD)/snapshot-wave
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/snapshot-wave/native.vcd docs/snapshot-cutover.svg \
+		--start 460 --end 1920 --title 'Snapshot cutover drains the old offer and gates new deltas' \
+		--signal '$(SNAPSHOT_SCOPE).phase=Cutover Phase' \
+		--signal '$(SNAPSHOT_SCOPE).m_valid=Live Valid' --signal '$(SNAPSHOT_SCOPE).m_ready=Live Ready' \
+		--signal '$(SNAPSHOT_SCOPE).m_slot=Live Slot' --signal '$(SNAPSHOT_SCOPE).m_epoch=Live Epoch' \
+		--signal '$(SNAPSHOT_SCOPE).cfg_valid=Native Command' --signal '$(SNAPSHOT_SCOPE).ack_valid=Native Reply' \
+		--signal '$(SNAPSHOT_SCOPE).restore_valid=Book Commit Offer' --signal '$(SNAPSHOT_SCOPE).restore_ready=Book Ready' \
+		--signal '$(SNAPSHOT_SCOPE).delta_used=Buffered Deltas' --signal '$(SNAPSHOT_SCOPE).output_sequence=Live Sequence'

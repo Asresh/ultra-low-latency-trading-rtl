@@ -65,7 +65,8 @@ class WireFormat(unittest.TestCase):
         entry = Descriptor(Opcode.PUSH,17,0x400,19,FLAG_CRC,23,29)
         for code in Status:
             record = Completion.of_descriptor(entry,1,code,88,0xabcdef)
-            expected = 0xabcdef if code in (Status.OK,Status.CRC_ERROR,Status.WRITE_ERROR) else 0
+            digest_status = (Status.OK,Status.CRC_ERROR,Status.WRITE_ERROR,Status.VERIFY_ERROR)
+            expected = 0xabcdef if code in digest_status else 0
             self.assertEqual(record.crc,expected)
             self.assertEqual(record.length,17 if code==Status.OK else 0)
             self.assertEqual(record.cookie,19)

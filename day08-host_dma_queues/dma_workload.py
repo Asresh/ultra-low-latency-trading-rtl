@@ -9,7 +9,7 @@ import random
 
 from dma_model import AxiFault, Capture, Engine, Fabric, Phase, SparseMemory
 from dma_protocol import (
-    AxiResponse, Beat, Burst, Descriptor, FLAG_CRC, FLAG_IRQ, Opcode, QueueConfig, Region,
+    AxiResponse, Beat, Burst, Descriptor, FLAG_CRC, FLAG_IRQ, FLAG_VERIFY, Opcode, QueueConfig, Region,
     Ring, Status, U32_MASK, add_pointer, crc32, rounded,
 )
 
@@ -49,6 +49,7 @@ CASES = (
     "pull", "pull", "push", "push", "fence", "bad_opcode", "bad_descriptor",
     "out_of_range", "pull_crc", "push_crc", "stream_format", "timeout", "read_error",
     "write_error", "zero_length", "unaligned",
+    "readback", "readback_crc", "verify", "verify_corrupt", "verify_read_error",
 )
 
 
@@ -76,6 +77,22 @@ def make_item(rng,lane,ordinal,aperture,kind):
     if kind == "push":
         d = replace(d,op=Opcode.PUSH)
         return Work(lane,d,Status.OK,capture=Capture.body(data),push=data,observed_crc=digest)
+    if kind == "readback":
+        d = replace(d,op=Opcode.READBACK)
+        return Work(lane,d,Status.OK,memory_prepare=data,observed_crc=digest)
+    if kind == "readback_crc":
+        d = replace(d,op=Opcode.READBACK,flags=flag|FLAG_CRC,expected_crc=digest^1)
+        return Work(lane,d,Status.CRC_ERROR,memory_prepare=data,observed_crc=digest)
+    if kind in ("verify", "verify_corrupt", "verify_read_error"):
+        d = replace(d,op=Opcode.PUSH,flags=flag|FLAG_VERIFY)
+        status, observed, fault = Status.OK, digest, None
+        if kind == "verify_corrupt":
+            fault = AxiFault(Phase.VERIFY,address=address,queue=lane,read_xor=1)
+            status, observed = Status.VERIFY_ERROR, crc32(bytes((data[0]^1,))+data[1:])
+        elif kind == "verify_read_error":
+            fault = AxiFault(Phase.VERIFY,AxiResponse.SLVERR,address,lane)
+            status, observed = Status.READ_ERROR, 0
+        return Work(lane,d,status,capture=Capture.body(data),push=data,fault=fault,observed_crc=observed)
     if kind == "fence":
         return Work(lane,Descriptor(Opcode.FENCE,cookie=cookie,tag=ordinal,flags=flag&FLAG_IRQ),
                     Status.OK)

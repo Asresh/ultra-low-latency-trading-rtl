@@ -80,6 +80,7 @@ module tb_host_dma_queues;
     logic [48:0] held_capture;
     logic [31:0] sink_bits = 32'ha57b1273;
     integer completion_capture = 0, packet_capture = 0;
+    logic integrity_run = 0;
 
     // Open optional completion and packet logs when a capture path is supplied.
     task automatic open_capture;
@@ -164,6 +165,8 @@ module tb_host_dma_queues;
             tx_held = 0;
             cap_held = 0;
         end else begin
+            if (integrity_run && packet_valid)
+                $fatal(1,"An integrity request leaked a packet to the PULL stream");
             if (tx_held && (!packet_valid || {packet_data,packet_keep,packet_first,packet_last,
                                              packet_tag,packet_queue,packet_cookie} !== held_packet))
                 $fatal(1,"TX sidebands changed under backpressure");
@@ -426,12 +429,21 @@ module tb_host_dma_queues;
         end
     end
 
+`include "tb_dma_readback.svh"
+
     initial begin : run
         logic [31:0] crc_a, crc_b;
         logic [31:0] saved_sq, saved_cq;
         integer before_read, before_write;
         open_capture();
+        integrity_run = $test$plusargs("readback");
         reset_core();
+        if (integrity_run) begin
+            run_readback();
+            if (packet_capture) $fclose(packet_capture);
+            if (completion_capture) $fclose(completion_capture);
+            $finish;
+        end
         configure(1,1,0,1,0);
         configure(0,1,32'hfffffffd,0,1);
         configure(1,1,32'd25,0,1);

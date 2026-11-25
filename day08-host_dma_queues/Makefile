@@ -9,10 +9,10 @@ RTL := $(shell cat rtl.f)
 HEADERS := dma_protocol.svh
 MEMORY_MODEL := tb_dma_memory.sv
 
-.PHONY: waveform wave-vcd all test regress icarus test-host test-components test-integration lint synth clean
+.PHONY: waveform wave-vcd waveform-readback all test regress icarus test-host test-components test-integration test-readback lint synth clean
 all: test
 regress icarus: test
-test: test-host test-components test-integration
+test: test-host test-components test-integration test-readback
 
 test-host: | $(BUILD)
 	$(PYTHON) -B -m unittest discover -v
@@ -26,6 +26,28 @@ test-integration: $(BUILD)/tb_host_dma_queues.vvp $(BUILD)/tb_dma_contention.vvp
 	$(PYTHON) -B audit_directed_capture.py $(BUILD)
 	$(VVP) $(BUILD)/tb_dma_contention.vvp
 
+test-readback: $(BUILD)/tb_host_dma_queues.vvp
+	mkdir -p $(BUILD)/readback
+	$(VVP) $< +readback +capture=$(BUILD)/readback
+	$(PYTHON) -B audit_dma_readback.py $(BUILD)/readback
+
+waveform-readback: $(BUILD)/tb_host_dma_queues.vvp ../scripts/render_vcd_waveform.py
+	mkdir -p $(BUILD)/readback-wave
+	$(VVP) $< +readback +capture=$(BUILD)/readback-wave +waves=$(BUILD)/readback-wave/readback.vcd
+	$(PYTHON) -B audit_dma_readback.py $(BUILD)/readback-wave
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/readback-wave/readback.vcd readback_waveform.svg \
+		--start 1090 --end 1855 --title 'Verified PUSH waits for payload B, readback, and CQ B' \
+		--signal 'tb_host_dma_queues.dut.state=DMA worker state' \
+		--signal 'tb_host_dma_queues.block_write_response=Memory holds B' \
+		--signal 'tb_host_dma_queues.bvalid=AXI B valid' \
+		--signal 'tb_host_dma_queues.bready=AXI B ready' \
+		--signal 'tb_host_dma_queues.arvalid=AXI AR valid' \
+		--signal 'tb_host_dma_queues.rvalid=AXI R valid' \
+		--signal 'tb_host_dma_queues.rlast=AXI R last' \
+		--signal 'tb_host_dma_queues.awvalid=AXI AW valid' \
+		--signal 'tb_host_dma_queues.inspect_cq_tail=Queue 0 CQ tail' \
+		--signal 'tb_host_dma_queues.irq=IRQ'
+
 $(BUILD):
 	mkdir -p $@
 
@@ -34,6 +56,8 @@ $(BUILD)/tb_dma_axi64_max.vvp: tb_dma_axi64.sv $(RTL) $(HEADERS) rtl.f | $(BUILD
 
 $(BUILD)/tb_host_dma_queues.vvp $(BUILD)/tb_dma_contention.vvp: $(BUILD)/tb_%.vvp: tb_%.sv $(MEMORY_MODEL) $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_$* -o $@ -f rtl.f $< $(MEMORY_MODEL)
+
+$(BUILD)/tb_host_dma_queues.vvp: tb_dma_readback.svh
 
 $(BUILD)/tb_%.vvp: tb_%.sv $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I . -s tb_$* -o $@ -f rtl.f $<

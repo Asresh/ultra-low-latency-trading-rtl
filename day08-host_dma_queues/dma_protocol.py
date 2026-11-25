@@ -17,13 +17,15 @@ AXI_PAGE = 4096
 RING_RECORD = struct.Struct("<QQQQ")
 FLAG_IRQ = 1
 FLAG_CRC = 2
-VALID_FLAGS = FLAG_IRQ|FLAG_CRC
+FLAG_VERIFY = 4
+VALID_FLAGS = FLAG_IRQ|FLAG_CRC|FLAG_VERIFY
 
 
 class Opcode(IntEnum):
     PULL = 1
     PUSH = 2
     FENCE = 3
+    READBACK = 4
 
 
 class Status(IntEnum):
@@ -36,6 +38,7 @@ class Status(IntEnum):
     CRC_ERROR = 6
     STREAM_FORMAT = 7
     CAPTURE_TIMEOUT = 8
+    VERIFY_ERROR = 9
 
 
 class AxiResponse(IntEnum):
@@ -205,6 +208,11 @@ class Descriptor:
         """Return the descriptor flag that bypasses IRQ moderation."""
         return bool(self.flags & FLAG_IRQ)
 
+    @property
+    def verify_write(self):
+        """Return the PUSH flag that compares AXI readback to the captured bytes."""
+        return bool(self.flags & FLAG_VERIFY)
+
     def words(self):
         """Return the protocol record as fixed-width little-endian bus words."""
         first = packed_fields((self.op,8),(self.flags,8),(self.tag,16),(self.length,32))
@@ -234,10 +242,12 @@ class Descriptor:
         """Check the record for inconsistent fields before it can be encoded or consumed."""
         if self.flags & ~VALID_FLAGS or self.reserved or (self.expected_crc and not self.check_crc):
             return Status.BAD_DESC
+        if self.verify_write and self.op != Opcode.PUSH:
+            return Status.BAD_DESC
         if self.op == Opcode.FENCE:
             if self.length or self.address or self.check_crc:
                 return Status.BAD_DESC
-        elif self.op not in (Opcode.PULL,Opcode.PUSH):
+        elif self.op not in (Opcode.PULL,Opcode.PUSH,Opcode.READBACK):
             return Status.BAD_OP
         elif not 1 <= self.length <= MAX_PAYLOAD or self.address%LANES:
             return Status.ADDRESS
@@ -273,7 +283,8 @@ class Completion:
     def of_descriptor(cls, descriptor, queue, status, timestamp, computed_crc=0):
         """Construct a completion while preserving the descriptor identity and status."""
         byte_count = descriptor.length if status == Status.OK else 0
-        reported_crc = computed_crc if status in (Status.OK,Status.CRC_ERROR,Status.WRITE_ERROR) else 0
+        digest_status = (Status.OK,Status.CRC_ERROR,Status.WRITE_ERROR,Status.VERIFY_ERROR)
+        reported_crc = computed_crc if status in digest_status else 0
         return cls(status,descriptor.op,descriptor.tag,byte_count,descriptor.cookie,reported_crc,
                    queue,timestamp)
 

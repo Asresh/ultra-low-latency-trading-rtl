@@ -4,6 +4,8 @@ A bidirectional DMA core for moving small packets, control messages and captures
 
 The default core has two queues of eight entries, a 512-byte packet buffer, 64-bit memory and stream interfaces, and a 16-beat memory burst cap. The design is useful for studying where descriptor fetching, integrity checks, queue credits and write acknowledgements add latency to a host/FPGA boundary.
 
+The [memory integrity path](#memory-readback-and-verified-capture) adds digest-only READBACK and optional PUSH readback verification for host-buffer captures.
+
 ```mermaid
 flowchart LR
     Host["Host rings and doorbells"] --> Queues["Queue table<br/>credits, bounds and IRQ"]
@@ -68,24 +70,58 @@ Each row is one little-endian 64-bit word. Fields separated by vertical bars are
 | 1 | **PULL.** Read all payload beats, accumulate CRC, then send the staged packet to the FPGA sink. Completion follows the accepted final packet beat. |
 | 2 | **PUSH.** Offer a tagged capture request, collect the associated frame, validate its shape and CRC, then write payload memory. Completion follows the last payload write response. |
 | 3 | **FENCE.** Publish an in-order completion for the queue after prior work has retired. Length, address, CRC flag and expected CRC must be zero. |
+| 4 | **READBACK.** Read an aligned byte range and return its CRC-32 in the completion. The packet and capture ports remain idle. The CRC flag enables an expected-digest comparison. |
 
-Flag bit 0 requests an immediate interrupt after retirement. Flag bit 1 compares the payload against the expected IEEE CRC-32. CRC counts only valid bytes in wire order, starts with all ones and uses final complement. The 64-bit cookie is application-defined and is copied into the completion. Both flags may be set on a payload descriptor. Other flag bits and the reserved word must be zero. The expected CRC field must be zero when comparison is disabled.
+Flag bit 0 requests an immediate interrupt after retirement. Flag bit 1 compares the payload against the expected IEEE CRC-32. Flag bit 2 enables write verification and is valid for PUSH only. CRC counts only valid bytes in wire order, starts with all ones and uses final complement. The 64-bit cookie is application-defined and is copied into the completion. Reserved flags and the reserved word must be zero. The expected CRC field must be zero when comparison is disabled.
 
 An address must be 8-byte aligned and the entire rounded memory footprint must fall inside the configured payload interval without carry. Packets can end in a partial beat. The bus uses a final write strobe to protect surrounding bytes and the packet output zeroes unselected lanes.
 
 | Status | Meaning and effect |
 | ---: | --- |
-| 0 | Success. The CQ reports the full packet length for PULL and PUSH and zero for FENCE. |
+| 0 | Success. The CQ reports the processed length for PULL, PUSH and READBACK and zero for FENCE. |
 | 1 | Unsupported operation. |
 | 2 | Reserved bits, CRC request format or FENCE arguments invalid. |
 | 3 | Payload length or rounded address range invalid. |
-| 4 | Descriptor or payload read received an unsuccessful AXI response. A failed descriptor read zeroes opcode, tag and cookie. A failed PULL produces no packet. |
+| 4 | Descriptor, payload or verification read received an unsuccessful AXI response. A failed descriptor read zeroes opcode, tag and cookie. A failed PULL produces no packet. A failed PUSH verification read can follow a successful payload write. |
 | 5 | Payload write received an unsuccessful AXI response. Earlier writes can already be visible, so the host must treat the destination as tainted. |
 | 6 | Computed CRC differs from the expected value. PULL emits no packet and PUSH leaves its destination untouched. |
 | 7 | Capture frame has invalid first/last markers, lanes or length. The core drains through a final marker when present within the drain budget. |
 | 8 | Capture timed out after the offer was accepted. The capture adapter uses `capture_abort` to abandon that request. |
+| 9 | Verified PUSH received bytes whose digest differs from the captured frame. The completion carries the observed readback digest. Treat the destination as unverified. |
 
-Errors report zero transferred bytes. CRC mismatch and payload write failure retain the computed digest. Other errors report zero CRC. The timestamp is the free-running engine cycle when the worker decided the result, before it issues completion writeback. Unsigned subtraction handles bounded intervals across the 64-bit cycle wrap.
+Errors report zero transferred bytes. CRC mismatch, payload write failure and verification mismatch retain a computed digest. Other errors report zero CRC. The timestamp is the free-running engine cycle when the worker decided the result, before it issues completion writeback. Unsigned subtraction handles bounded intervals across the 64-bit cycle wrap.
+
+## Memory readback and verified capture
+
+Use READBACK to check a capture log or a host-written replay buffer before handing the region to another queue or process. It processes the returned AXI beats directly through the CRC accumulator and leaves the packet buffer and device stream idle. It does not increment `pull_bytes` or `push_bytes`. The completion gives the exact verified or sampled length, with neighboring bytes beyond the requested length excluded from the digest.
+
+Use verified PUSH for captures whose host buffer must be checked before software consumes the completion, such as an order-gateway incident trace or a loss-monitoring ring. The worker validates the capture and optional expected CRC first. After the final successful payload B response, it reads the same byte span, compares its digest against the retained capture digest, and writes the completion. A failed payload B prevents readback. A failed read or mismatched digest can leave payload bytes in memory. Identify the result by queue, tag and cookie, and examine status before consuming the payload. The Arm AXI ordering model specifies the ordering of a same-location read received after a write completion response. Host cache maintenance, PCIe posted-write flush semantics and durability belong to the platform adapter and host driver. CRC-32 detects common data corruption. [Arm AXI ordering model](https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/IHI0022H_amba_axi_protocol_spec.pdf), [Linux bus-independent device access](https://docs.kernel.org/driver-api/device-io.html)
+
+```mermaid
+sequenceDiagram
+    participant C as FPGA capture
+    participant D as DMA worker
+    participant M as AXI memory
+    participant H as Completion queue
+    C->>D: Stream accepted bytes and final mask
+    D->>D: Retain capture CRC
+    rect rgb(219, 234, 254)
+        D->>M: Write payload in bounded bursts
+        M-->>D: Final payload B
+        D->>M: Read same span
+        M-->>D: Read data and final R beat
+    end
+    D->>D: Compare readback CRC
+    rect rgb(220, 252, 231)
+        D->>M: Write completion
+        M-->>D: CQ B
+        D->>H: Advance SQ/CQ cursors and optional IRQ
+    end
+```
+
+![RTL simulation of the final payload B, verification read and CQ publication](readback_waveform.svg)
+
+For tag `0x0100`, the final payload response transfers at 1225 ns, the verification read starts at 1255 ns and its last beat transfers at 1635 ns. The completion B transfers at 1825 ns. The queue tail changes from `0xfffffffd` to `0xfffffffe` and IRQ asserts at 1835 ns. Run `make waveform-readback` to rerun the checked fixture and rebuild the figure.
 
 ## Interface and implementation
 
@@ -117,8 +153,9 @@ make synth
 | AXI transport | Two burst caps, 5 and 16, each with 265 duplex cases covering all five channel stalls, partial masks, page splitting, error responses, malformed last and transfers at the top of the 64-bit address space. |
 | Queue and interrupt units | 1,073 retired entries across three queues, concurrent retirement and doorbell updates, modulo wrap, full CQ and invalid configuration. Interrupt tests cover batch, timer, saturation and coincident acknowledge/retire. |
 | CRC | 4,845 accepted beats, 19,348 selected bytes, every keep mask, the standard `123456789` check and a separate bit-oriented oracle. |
-| Host reference | 37 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all nine statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
-| Structural checks | Verilator lint passed. Default Yosys synthesis produced 32,456 generic cells and zero structural findings. |
+| Memory integrity | An RTL run checks 29 completions, nine error responses, 677 verified PUSH bytes, every partial final lane count, and the 512-byte maximum. It covers a corrupted readback, held responses, failed payload and verification responses, and fail-stop after malformed verification RLAST. An independent Python audit checks all CQ payload fields and confirms zero stream packets. |
+| Host reference | 44 unit tests and a seeded run with 192 descriptors across two queues. The run exercises all ten statuses, verifies the AXI transaction ledger and intentionally holds CQ write responses. |
+| Structural checks | Strict Verilator lint passed. Default Yosys synthesis produced 32,057 generic cells and zero structural findings. |
 
 The regression writes `build/completions.hex` and `build/packets.txt` from the RTL. Run `python3 audit_directed_capture.py build` to compare those files again. For the host model, `python3 dma_workload.py --seed 8088 --requests 96 --depth 8 --output build/ledger.json` produces a separate expected workload. `dma_audit.py LEDGER COMPLETIONS PACKETS` accepts one 32-byte completion per hex row and one `queue tag cookie data keep first last` record per accepted stream beat. Completion order is compared per queue by default. An optional strict mode also compares the global schedule.
 

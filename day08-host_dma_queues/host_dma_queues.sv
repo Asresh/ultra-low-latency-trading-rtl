@@ -106,7 +106,7 @@ module host_dma_queues #(
     output logic [63:0] push_bytes
 );
     localparam logic [3:0] IDLE = 0, DESC_CMD = 1, DESC_READ = 2, CHECK = 3,
-                           PULL_CMD = 4, PULL_READ = 5, PULL_SEND = 6,
+                           PAYLOAD_READ_CMD = 4, PAYLOAD_READ = 5, PULL_SEND = 6,
                            PUSH_OFFER = 7, PUSH_COLLECT = 8, PUSH_DRAIN = 9,
                            PUSH_CMD = 10, PUSH_WRITE = 11, COMPLETE_CMD = 12,
                            COMPLETE_WRITE = 13, FAILED = 14;
@@ -124,6 +124,7 @@ module host_dma_queues #(
     logic [WAIT_W-1:0] wait_count;
     logic [7:0] completion_status;
     logic [31:0] completion_count, completion_crc;
+    logic [31:0] write_digest;
     logic [63:0] completion_tick;
     logic abort_q;
 
@@ -142,14 +143,15 @@ module host_dma_queues #(
         length != 0 && length <= MAX_PACKET_BYTES && address[2:0] == 0 && !payload_end[64] &&
         address >= region_low && payload_end <= {1'b0,region_high};
     wire basic_format_ok =
-        flags[7:2] == 0 && reserved_word == 0 && (flags[1] || expected_crc == 0);
+        flags[7:3] == 0 && reserved_word == 0 && (flags[1] || expected_crc == 0) &&
+        (!flags[2] || operation == `DMA_PUSH);
 
     logic [63:0] packet_memory [0:WORDS-1];
     wire rd_cmd_ready, rd_valid, rd_done, rd_fault, rd_protocol;
     wire [63:0] rd_data;
     wire [7:0] rd_keep;
     wire wr_cmd_ready, wr_ready, wr_done, wr_fault;
-    wire from_read = (state == DESC_READ || state == PULL_READ) && rd_valid;
+    wire from_read = (state == DESC_READ || state == PAYLOAD_READ) && rd_valid;
     wire from_packet = s_packet_valid && s_packet_ready;
     wire [31:0] digest;
     wire checksum_ok = !flags[1] || digest == expected_crc;
@@ -226,10 +228,10 @@ module host_dma_queues #(
 
     dma_axi64 #(.MAX_BURST(MAX_BURST)) memory_transport (
         .clk, .reset,
-        .rd_cmd_valid(state == DESC_CMD || state == PULL_CMD), .rd_cmd_ready,
+        .rd_cmd_valid(state == DESC_CMD || state == PAYLOAD_READ_CMD), .rd_cmd_ready,
         .rd_cmd_addr(state == DESC_CMD ? sq_address : address),
         .rd_cmd_bytes(state == DESC_CMD ? 32'd32 : length),
-        .rd_valid, .rd_ready(state == DESC_READ || state == PULL_READ),
+        .rd_valid, .rd_ready(state == DESC_READ || state == PAYLOAD_READ),
         .rd_data, .rd_keep, .rd_last(), .rd_done, .rd_fault, .rd_protocol,
         .wr_cmd_valid((state == PUSH_CMD && checksum_ok) || state == COMPLETE_CMD), .wr_cmd_ready,
         .wr_cmd_addr(state == COMPLETE_CMD ? cq_address : address),
@@ -249,11 +251,11 @@ module host_dma_queues #(
                          s_packet_keep == keep_for(bytes_left);
     wire capture_timeout = wait_count == WAIT_W'(CAPTURE_TIMEOUT-1);
     dma_crc32 checksum (
-        .clk, .reset, .seed(state == CHECK),
-        .take((state == PULL_READ && from_read) ||
+        .clk, .reset, .seed(state == CHECK || (state == PAYLOAD_READ_CMD && operation == `DMA_PUSH)),
+        .take((state == PAYLOAD_READ && from_read) ||
             (state == PUSH_COLLECT && from_packet && capture_shape)),
-        .data(state == PULL_READ ? rd_data : s_packet_data),
-        .keep(state == PULL_READ ? rd_keep : s_packet_keep),
+        .data(state == PAYLOAD_READ ? rd_data : s_packet_data),
+        .keep(state == PAYLOAD_READ ? rd_keep : s_packet_keep),
         .digest
     );
 
@@ -274,7 +276,7 @@ module host_dma_queues #(
     assign busy = state != IDLE;
 
     always_ff @(posedge clk) begin
-        if (!reset && state == PULL_READ && from_read)
+        if (!reset && state == PAYLOAD_READ && operation == `DMA_PULL && from_read)
             packet_memory[data_word] <= rd_data;
         if (!reset && state == PUSH_COLLECT && from_packet && capture_shape)
             packet_memory[data_word] <= mask_invalid(s_packet_data, s_packet_keep);
@@ -300,6 +302,7 @@ module host_dma_queues #(
             completion_status <= '0;
             completion_count <= '0;
             completion_crc <= '0;
+            write_digest <= '0;
             completion_tick <= '0;
             data_word <= '0;
             bytes_left <= '0;
@@ -361,20 +364,21 @@ module host_dma_queues #(
                             finish(`DMA_BAD_DESC,0,0);
                         else
                             finish(`DMA_OK,0,0);
-                    end else if (operation != `DMA_PULL && operation != `DMA_PUSH) begin
+                    end else if (operation != `DMA_PULL && operation != `DMA_PUSH &&
+                                 operation != `DMA_READBACK) begin
                         finish(`DMA_BAD_OP,0,0);
                     end else if (!transfer_shape_ok) begin
                         finish(`DMA_ADDRESS,0,0);
-                    end else if (operation == `DMA_PULL) begin
-                        state <= PULL_CMD;
-                    end else begin
+                    end else if (operation == `DMA_PUSH) begin
                         state <= PUSH_OFFER;
+                    end else begin
+                        state <= PAYLOAD_READ_CMD;
                     end
                 end
-                PULL_CMD: if (rd_cmd_ready)
-                    state <= PULL_READ;
-                PULL_READ: begin
-                    if (from_read)
+                PAYLOAD_READ_CMD: if (rd_cmd_ready)
+                    state <= PAYLOAD_READ;
+                PAYLOAD_READ: begin
+                    if (from_read && operation == `DMA_PULL)
                         data_word <= data_word + 1'b1;
                     if (rd_done) begin
                         data_word <= 0;
@@ -383,10 +387,17 @@ module host_dma_queues #(
                             state <= FAILED;
                         end else if (rd_fault) begin
                             finish(`DMA_READ,0,0);
+                        end else if (operation == `DMA_PUSH) begin
+                            if (write_digest == digest)
+                                finish(`DMA_OK,length,digest);
+                            else
+                                finish(`DMA_VERIFY,0,digest);
                         end else if (!checksum_ok) begin
                             finish(`DMA_CRC,0,digest);
-                        end else begin
+                        end else if (operation == `DMA_PULL) begin
                             state <= PULL_SEND;
+                        end else begin
+                            finish(`DMA_OK,length,digest);
                         end
                     end
                 end
@@ -446,8 +457,12 @@ module host_dma_queues #(
                     if (wr_done) begin
                         if (wr_fault)
                             finish(`DMA_WRITE,0,digest);
-                        else
+                        else if (flags[2]) begin
+                            write_digest <= digest;
+                            state <= PAYLOAD_READ_CMD;
+                        end else begin
                             finish(`DMA_OK,length,digest);
+                        end
                     end
                 end
                 COMPLETE_CMD: if (wr_cmd_ready)

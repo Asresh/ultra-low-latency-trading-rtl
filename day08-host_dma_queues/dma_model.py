@@ -15,6 +15,8 @@ class Phase(Enum):
     DESCRIPTOR = "descriptor"
     PULL = "pull"
     PUSH = "push"
+    READBACK = "readback"
+    VERIFY = "verify"
     COMPLETION = "completion"
 
 
@@ -82,6 +84,7 @@ class AxiFault:
     last: bool = None
     remaining: int = 1
     apply_write: bool = False
+    read_xor: int = 0
 
     def __post_init__(self):
         """Validate the bus phase, address and count for this fault injection."""
@@ -90,6 +93,7 @@ class AxiFault:
             raise ValueError("fault injection hit count must be nonnegative")
         if self.address is not None:
             bounded(self.address,64,"fault address")
+        bounded(self.read_xor,64,"read corruption mask")
 
     def select(self, phase, queue, address):
         """Check whether an armed fault matches this request and consume one hit."""
@@ -127,6 +131,8 @@ class Fabric:
                 last = rule.last if rule and rule.last is not None else wanted_last
                 response = rule.response if rule else AxiResponse.OKAY
                 word = self.memory.word(position)
+                if rule:
+                    word ^= rule.read_xor
                 self.trace.append(Access(queue,phase,"R",position,word,last=last,response=response))
                 if last != wanted_last:
                     return bytes(raw[:length]),failed,True
@@ -405,8 +411,9 @@ class Engine:
         validation = descriptor.validate(queue.config.aperture)
         if validation != Status.OK or descriptor.op == Opcode.FENCE:
             return validation,0
-        if descriptor.op == Opcode.PULL:
-            body,failed,protocol = self.fabric.read(index,Phase.PULL,descriptor.address,descriptor.length)
+        if descriptor.op in (Opcode.PULL, Opcode.READBACK):
+            phase = Phase.PULL if descriptor.op == Opcode.PULL else Phase.READBACK
+            body,failed,protocol = self.fabric.read(index,phase,descriptor.address,descriptor.length)
             if protocol:
                 self.fatal = Fatal.AXI_READ_PROTOCOL
             if protocol or failed:
@@ -422,8 +429,23 @@ class Engine:
         if descriptor.op == Opcode.PULL:
             self.emissions.append(Emission(index,descriptor.tag,descriptor.cookie,body))
             return Status.OK,digest
+        if descriptor.op == Opcode.READBACK:
+            return Status.OK,digest
         success = self.fabric.write(index,Phase.PUSH,descriptor.address,body)
-        return (Status.OK if success else Status.WRITE_ERROR),digest
+        if not success:
+            return Status.WRITE_ERROR,digest
+        if descriptor.verify_write:
+            observed,failed,protocol = self.fabric.read(
+                index,Phase.VERIFY,descriptor.address,descriptor.length
+            )
+            if protocol:
+                self.fatal = Fatal.AXI_READ_PROTOCOL
+            if protocol or failed:
+                return Status.READ_ERROR,0
+            observed_crc = crc32(observed)
+            if observed_crc != digest:
+                return Status.VERIFY_ERROR,observed_crc
+        return Status.OK,digest
 
     def start(self):
         """Execute the scheduler's next eligible descriptor and defer CQ visibility to B."""

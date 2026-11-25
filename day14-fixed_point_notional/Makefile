@@ -28,7 +28,7 @@ $(BUILD)/divide-wide.vvp: tb_notional_divide.sv notional_divide.sv | $(BUILD)
 $(BUILD)/pair.vvp: tb_notional_pair.sv $(RTL) $(HEADERS) rtl.f | $(BUILD)
 	$(IVERILOG) -g2012 -I. -s tb_notional_pair -o $@ -f rtl.f $<
 
-test: basket-test $(BUILD)/pair.vvp $(foreach frac,$(PROFILES),$(BUILD)/q$(frac).vvp) $(BUILD)/divide-small.vvp $(BUILD)/divide-wide.vvp
+test: basket-test fee-tier-test $(BUILD)/pair.vvp $(foreach frac,$(PROFILES),$(BUILD)/q$(frac).vvp) $(BUILD)/divide-small.vvp $(BUILD)/divide-wide.vvp
 	$(PYTHON) -B -m unittest discover -v
 	$(VVP) $(BUILD)/divide-small.vvp
 	$(VVP) $(BUILD)/divide-wide.vvp
@@ -49,7 +49,7 @@ demo: $(BUILD)/q8.vvp
 
 WAVE_SCOPE := tb_fixed_point_notional
 waveform: DEMO_WAVEFORM := +waveform=$(BUILD)/notional-demo.vcd
-waveform: demo basket-waveform
+waveform: demo basket-waveform fee-tier-waveform
 	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/notional-demo.vcd waveform.svg \
 		--start 2130 --end 2250 --title "Rounded notional response waits for the consumer" \
 		--signal '$(WAVE_SCOPE).clk=Clock' --signal '$(WAVE_SCOPE).req_ready=Request ready' \
@@ -58,11 +58,11 @@ waveform: demo basket-waveform
 		--signal '$(WAVE_SCOPE).rsp_gross=Gross' --signal '$(WAVE_SCOPE).rsp_fee=Fee' \
 		--signal '$(WAVE_SCOPE).rsp_cash=Cash debit'
 
-lint: basket-lint
+lint: basket-lint fee-tier-lint
 	$(VERILATOR) --lint-only -Wall -I. --top-module $(TOP) -f rtl.f
 	$(VERILATOR) --lint-only -Wall -I. --top-module notional_pair -f rtl.f
 
-synth: basket-synth | $(BUILD)
+synth: basket-synth fee-tier-synth | $(BUILD)
 	$(YOSYS) -Q -q -l $(BUILD)/synth.log -m slang -p 'read_slang -I. --top $(TOP) $(RTL); synth -top $(TOP) -noabc; check -assert; stat'
 	$(YOSYS) -Q -q -l $(BUILD)/pair-synth.log -m slang -p 'read_slang -I. --top notional_pair $(RTL); synth -top notional_pair -noabc; check -assert; stat'
 	tail -n 20 $(BUILD)/synth.log
@@ -116,3 +116,42 @@ basket-waveform: $(BUILD)/basket-main.vvp $(BUILD)/basket-lesson.txt
 		--signal '$(BASKET_SCOPE).leg_sell=Sell leg' --signal '$(BASKET_SCOPE).rsp_gross=Rounded gross sum' \
 		--signal '$(BASKET_SCOPE).rsp_net_cash=Signed net debit' \
 		--signal '$(BASKET_SCOPE).rsp_valid=Result valid' --signal '$(BASKET_SCOPE).rsp_ready=Result ready'
+
+FEE_RTL := tiered_fee_settlement.sv notional_divide.sv
+FEE_TB := tb_tiered_fee_settlement
+.PHONY: fee-tier-test fee-tier-lint fee-tier-synth fee-tier-waveform
+
+define fee_case
+$(BUILD)/fee-$(1).vvp: $(FEE_TB).sv $(FEE_RTL) | $(BUILD)
+	$(IVERILOG) -g2012 -s $(FEE_TB) -P$(FEE_TB).VENUES=$(2) -P$(FEE_TB).TIERS=$(3) \
+		-P$(FEE_TB).PRICE_FRAC=$(4) -o $$@ $$^
+
+$(BUILD)/fee-$(1).hex: fee_tier_vectors.py notional_model.py | $(BUILD)
+	$(PYTHON) -B fee_tier_vectors.py $$@ --venues $(2) --tiers $(3) --fraction $(4) --seed $(5)
+
+.PHONY: fee-tier-$(1)
+fee-tier-$(1): $(BUILD)/fee-$(1).vvp $(BUILD)/fee-$(1).hex
+	$(VVP) $$< +vectors=$(BUILD)/fee-$(1).hex
+endef
+
+$(eval $(call fee_case,main,3,4,8,57013))
+$(eval $(call fee_case,wide,1,3,0,72042))
+$(eval $(call fee_case,tiny,2,1,31,15067))
+
+fee-tier-test: fee-tier-main fee-tier-wide fee-tier-tiny
+
+fee-tier-lint:
+	$(VERILATOR) --lint-only -Wall --top-module tiered_fee_settlement $(FEE_RTL)
+
+fee-tier-synth: | $(BUILD)
+	$(YOSYS) -Q -q -l $(BUILD)/fee-tier-synth.log -m slang -p 'read_slang --top tiered_fee_settlement $(FEE_RTL); synth -top tiered_fee_settlement -noabc; check -assert; stat'
+
+fee-tier-waveform: $(BUILD)/fee-main.vvp $(BUILD)/fee-main.hex
+	$(VVP) $< +vectors=$(BUILD)/fee-main.hex +wave=$(BUILD)/fee.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(BUILD)/fee.vcd fee-tier-waveform.svg \
+		--start 55 --end 1510 --title 'Tiered fees · Split turnover across rate bands before rounding' \
+		--signal '$(FEE_TB).s_valid=Fill request' --signal '$(FEE_TB).s_ready=Fill ready' \
+		--signal '$(FEE_TB).dut.tier_index=Tier index' --signal '$(FEE_TB).dut.slice=Gross allocated to tier' \
+		--signal '$(FEE_TB).m_gross=Gross notional' --signal '$(FEE_TB).m_fee=Net signed fee' \
+		--signal '$(FEE_TB).m_cash=Cash amount' --signal '$(FEE_TB).m_tiers=Tiers touched' \
+		--signal '$(FEE_TB).m_valid=Settlement valid' --signal '$(FEE_TB).m_ready=Settlement ready'

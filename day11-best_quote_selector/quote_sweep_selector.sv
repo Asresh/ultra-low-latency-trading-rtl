@@ -44,10 +44,10 @@ module quote_sweep_selector #(
     input wire cfg_enabled,
     input wire [QTY_W-1:0] cfg_cap,
     input wire signed [FEE_W-1:0] cfg_fee,
-    output logic cfg_error,
+    output wire cfg_error,
     input wire commit_valid,
     output wire commit_ready,
-    output logic [EPOCH_W-1:0] policy_epoch,
+    output wire [EPOCH_W-1:0] policy_epoch,
 
     input wire query_valid,
     output wire query_ready,
@@ -74,43 +74,12 @@ module quote_sweep_selector #(
 );
     wire [VENUES-1:0] read_enabled, read_present;
     wire [VENUES*RECORD_W-1:0] read_records;
-    localparam integer ROW_W = VENUES > 1 ? $clog2(VENUES) : 1;
-    logic active_bank;
-    logic [VENUES-1:0] enabled [0:1];
-    logic [VENUES*QTY_W-1:0] caps [0:1];
-    logic [VENUES*FEE_W-1:0] fees [0:1];
-    wire [ROW_W-1:0] write_row = VENUES == 1 ? '0 : ROW_W'(cfg_venue);
+    wire [VENUES-1:0] policy_enabled;
+    wire [VENUES*QTY_W-1:0] policy_caps;
+    wire [VENUES*FEE_W-1:0] policy_fees;
 
-    assign commit_ready = !rst;
-    assign cfg_ready = !rst && !commit_valid;
-
-    always_ff @(posedge clk) begin
-        if (rst) begin
-            active_bank <= 1'b0;
-            policy_epoch <= '0;
-            enabled[0] <= '1;
-            enabled[1] <= '1;
-            caps[0] <= '1;
-            caps[1] <= '1;
-            fees[0] <= '0;
-            fees[1] <= '0;
-            cfg_error <= 1'b0;
-        end else begin
-            cfg_error <= 1'b0;
-            if (commit_valid) begin
-                active_bank <= !active_bank;
-                policy_epoch <= policy_epoch + 1'b1;
-            end else if (cfg_valid) begin
-                if (int'(cfg_venue) >= VENUES)
-                    cfg_error <= 1'b1;
-                else begin
-                    enabled[!active_bank][write_row] <= cfg_enabled;
-                    caps[!active_bank][write_row*QTY_W +: QTY_W] <= cfg_cap;
-                    fees[!active_bank][write_row*FEE_W +: FEE_W] <= cfg_fee;
-                end
-            end
-        end
-    end
+    quote_fee_policy #(.VENUES(VENUES), .QTY_W(QTY_W), .FEE_W(FEE_W), .EPOCH_W(EPOCH_W))
+        policy (.*);
 
     quote_store #(
         .INSTRUMENTS(INSTRUMENTS), .VENUES(VENUES), .PRICE_W(PRICE_W),
@@ -123,12 +92,7 @@ module quote_sweep_selector #(
         .INSTRUMENTS(INSTRUMENTS), .VENUES(VENUES), .PRICE_W(PRICE_W),
         .QTY_W(QTY_W), .TIME_W(TIME_W), .SEQ_W(SEQ_W), .TAG_W(TAG_W),
         .FEE_W(FEE_W), .EPOCH_W(EPOCH_W)
-    ) plan (
-        .policy_enabled(enabled[active_bank]),
-        .policy_caps(caps[active_bank]),
-        .policy_fees(fees[active_bank]),
-        .*
-    );
+    ) plan (.*);
 endmodule
 
 `default_nettype wire

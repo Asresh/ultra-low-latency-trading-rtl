@@ -143,6 +143,12 @@ At 18 ns the quote update, policy commit, and first query transfer together. The
 
 Run `make test-sweep` for cycle-by-cycle comparisons on the four quote-store geometries. [The reference planner](quote_sweep_model.py) sorts immutable book data and computes value with exact Python integers. The test bench compares all result bits and accepted operations against [the independent cycle prediction](quote_sweep_vectors.py). [The host tests](test_quote_sweep.py) also enumerate feasible allocations at small sizes to check economic optimality. Run `make sweep-waveform` to regenerate the figure from the directed checked demo. The ignored trace files under `build/sweep-demo/` retain all sampled fields.
 
+## Reserving a sweep before dispatch
+
+[quote_reserved_sweep.sv](quote_reserved_sweep.sv) adds generation-scoped inventory and expiring reservation tokens. It plans over currently available shares, revalidates every child before booking, and debits the quote only when a still-applicable dispatch grant transfers. This lets several strategies share displayed venue capacity without each planning from the full displayed size.
+
+See the [reservation and grant contract, checked failure races, and waveform](reservation.md). Run `make test-reservation` for exact comparisons across the four quote geometries.
+
 ## Reproduce
 
 Use Python 3.9+, Icarus Verilog, Verilator, and Yosys.

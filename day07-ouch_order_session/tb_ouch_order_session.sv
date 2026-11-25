@@ -3,7 +3,8 @@
 
 module tb_ouch_order_session #(
     parameter integer ORDER_SLOTS = 8,
-    parameter integer REPLAY_HISTORY_DEPTH = 0
+    parameter integer REPLAY_HISTORY_DEPTH = 0,
+    parameter bit RECOVERABLE = 0
 );
     import ouch_wire_pkg::*;
     localparam integer NOTICE_BITS = $bits(notice_t);
@@ -45,8 +46,34 @@ module tb_ouch_order_session #(
     wire [31:0] highest_order_ref;
     wire [7:0] live_count, pending_count;
 
-    ouch_order_session #(.ORDER_SLOTS(ORDER_SLOTS), .TX_HEARTBEAT_TICKS(4),
-                         .RX_TIMEOUT_TICKS(7), .REPLAY_HISTORY_DEPTH(REPLAY_HISTORY_DEPTH)) dut (.*);
+    logic cp_cmd_valid = 0, cp_abort_import = 0, cp_in_valid = 0;
+    logic cp_in_last = 0, cp_out_ready = 0, cp_result_ready = 0;
+    logic [1:0] cp_cmd_op;
+    logic [63:0] cp_image_id;
+    logic [31:0] cp_in_data;
+    wire cp_cmd_ready, cp_in_ready, cp_out_valid, cp_out_last, cp_result_valid;
+    wire [31:0] cp_out_data;
+    wire [3:0] cp_result_status;
+    wire [1:0] cp_result_op;
+    wire [63:0] cp_result_id;
+    wire [7:0] cp_bad_slot;
+    wire checkpoint_busy, boot_open;
+    wire replay_fence_probe;
+    wire [63:0] socket_cursor_probe;
+
+    if (RECOVERABLE) begin : g_checkpoint
+        ouch_recoverable_session #(.ORDER_SLOTS(ORDER_SLOTS), .TX_HEARTBEAT_TICKS(4),
+            .RX_TIMEOUT_TICKS(7), .REPLAY_HISTORY_DEPTH(REPLAY_HISTORY_DEPTH)) dut (.*);
+        assign replay_fence_probe = dut.engine.replay_fenced;
+        assign socket_cursor_probe = dut.engine.socket_cursor;
+    end else begin : g_legacy
+        ouch_order_session #(.ORDER_SLOTS(ORDER_SLOTS), .TX_HEARTBEAT_TICKS(4),
+            .RX_TIMEOUT_TICKS(7), .REPLAY_HISTORY_DEPTH(REPLAY_HISTORY_DEPTH)) dut (.*);
+        assign replay_fence_probe = dut.engine.replay_fenced;
+        assign socket_cursor_probe = dut.engine.socket_cursor;
+        assign {cp_cmd_ready,cp_in_ready,cp_out_valid,cp_out_last,cp_result_valid,cp_out_data,
+                cp_result_status,cp_result_op,cp_result_id,cp_bad_slot,checkpoint_busy,boot_open} = '0;
+    end
 
     wire [SNAPSHOT_BITS-1:0] snapshot = {
         session_state, last_fault, session_id, next_sequence, replaying, market_open,
@@ -383,6 +410,131 @@ module tb_ouch_order_session #(
     logic [RAW_BITS-1:0] value;
     logic [63:0] trailing;
     string directory;
+    localparam integer ARCHIVE_WORDS = 5 + ($bits(checkpoint_meta_t)+31)/32 +
+                                     ORDER_SLOTS*(($bits(order_state_t)+31)/32);
+    logic [31:0] exported_archive [0:ARCHIVE_WORDS-1];
+    integer checkpoint_results = 0, archive_stalls = 0;
+    bit archive_saved = 0, archive_held = 0;
+    logic [32:0] archive_payload;
+
+    always @(posedge clk) begin
+        if (rst)
+            archive_held <= 0;
+        else begin
+            if (archive_held && (!cp_out_valid || {cp_out_last,cp_out_data} !== archive_payload))
+                $fatal(1,"checkpoint export changed held data");
+            archive_held <= cp_out_valid && !cp_out_ready;
+            archive_payload <= {cp_out_last,cp_out_data};
+            if (cp_out_valid && !cp_out_ready)
+                archive_stalls++;
+            if (RECOVERABLE && !boot_open && (live_count != 0 || highest_order_ref != 0 || next_sequence != 1))
+                $fatal(1,"uncommitted checkpoint state leaked");
+            if (RECOVERABLE && checkpoint_busy && (s_login_ready || s_cmd_ready || s_rx_ready || m_tx_valid))
+                $fatal(1,"session symbols accepted during checkpoint maintenance");
+        end
+    end
+
+    task automatic checkpoint_begin(input logic [1:0] operation, input logic [63:0] identifier);
+        @(negedge clk);
+        cp_cmd_op = operation;
+        cp_image_id = identifier;
+        cp_cmd_valid = 1;
+        do @(posedge clk); while (!cp_cmd_ready);
+        @(negedge clk);
+        cp_cmd_valid = 0;
+    endtask
+
+    task automatic checkpoint_end(input integer status, input logic [7:0] bad_slot);
+        logic [77:0] held;
+        while (!cp_result_valid) @(negedge clk);
+        if (cp_result_status !== 4'(status) || cp_bad_slot !== bad_slot ||
+            cp_result_op !== cp_cmd_op || cp_result_id !== cp_image_id)
+            $fatal(1,"checkpoint outcome expected %0d/%0d got %0d/%0d",
+                   status,bad_slot,cp_result_status,cp_bad_slot);
+        held = {cp_result_status,cp_result_op,cp_result_id,cp_bad_slot};
+        repeat (3) begin
+            @(negedge clk);
+            if (!cp_result_valid || {cp_result_status,cp_result_op,cp_result_id,cp_bad_slot} !== held)
+                $fatal(1,"checkpoint result changed while stalled");
+        end
+        cp_result_ready = 1;
+        checkpoint_results++;
+        @(negedge clk);
+        cp_result_ready = 0;
+    endtask
+
+    task automatic checkpoint_export(input logic [63:0] identifier, input integer expected_status);
+        integer file_handle, sent, tries;
+        checkpoint_begin(0,identifier);
+        if (expected_status == 0) begin
+            file_handle = $fopen({directory,"/hardware_archive.hex"},"w");
+            if (!file_handle)
+                $fatal(1,"could not open archive output");
+            sent = 0;
+            tries = 0;
+            while (sent < ARCHIVE_WORDS) begin
+                cp_out_ready = tries % 5 >= 2;
+                tries++;
+                @(posedge clk);
+                if (cp_out_valid && cp_out_ready) begin
+                    if (cp_out_last !== (sent == ARCHIVE_WORDS-1))
+                        $fatal(1,"unexpected archive last at word %0d",sent);
+                    exported_archive[sent] = cp_out_data;
+                    $fdisplay(file_handle,"%08h",cp_out_data);
+                    sent++;
+                end
+                @(negedge clk);
+            end
+            cp_out_ready = 0;
+            archive_saved = 1;
+            $fclose(file_handle);
+        end
+        checkpoint_end(expected_status,8'hff);
+    endtask
+
+    task automatic checkpoint_word(input logic [31:0] value_word, input bit last_word);
+        cp_in_valid = 1;
+        cp_in_data = value_word;
+        cp_in_last = last_word;
+        do @(posedge clk); while (!cp_in_ready);
+        @(negedge clk);
+        cp_in_valid = 0;
+    endtask
+
+    task automatic checkpoint_import(
+        input integer variant, input integer expected_status,
+        input logic [63:0] identifier, input logic [7:0] bad_slot
+    );
+        integer file_handle, count, final_word;
+        logic [31:0] value_word;
+        checkpoint_begin(1,identifier);
+        if (variant == 0 || variant == -1 || variant == -3) begin
+            if (!archive_saved)
+                $fatal(1,"no RTL-produced archive to restore");
+            final_word = variant == 0 ? ARCHIVE_WORDS : 12;
+            for (integer i = 0; i < final_word; i++)
+                checkpoint_word(exported_archive[i],variant == 0 && i == ARCHIVE_WORDS-1);
+            if (variant == -1) begin
+                cp_abort_import = 1;
+                @(negedge clk);
+                cp_abort_import = 0;
+            end
+        end else if (variant > 0) begin
+            file_handle = $fopen($sformatf("%s/import-%0d.hex",directory,variant),"r");
+            if (!file_handle || $fscanf(file_handle,"%d",count) != 1 || count < 1)
+                $fatal(1,"missing archive import fixture %0d",variant);
+            for (integer i = 0; i < count; i++) begin
+                if ($fscanf(file_handle,"%h",value_word) != 1)
+                    $fatal(1,"truncated host archive fixture");
+                checkpoint_word(value_word,i == count-1);
+            end
+            $fclose(file_handle);
+        end
+        if (variant == -3)
+            reset_core();
+        else
+            checkpoint_end(expected_status,bad_slot);
+    endtask
 
     // Save checked simulation pins when requested by the waveform target.
     initial begin : waveform_capture
@@ -390,7 +542,6 @@ module tb_ouch_order_session #(
         if ($value$plusargs("waves=%s", waves_path)) begin
             $dumpfile(waves_path);
             $dumpvars(1, tb_ouch_order_session);
-            $dumpvars(1, tb_ouch_order_session.dut);
         end
     end
 
@@ -443,6 +594,17 @@ module tb_ouch_order_session #(
                 10: throttle_tx(arg_a);
                 11: wait_for_partial_tx();
                 12: query_during_heartbeat(value[CMD_BITS-1:0], arg_a);
+                13: begin
+                    checkpoint_begin(2,value[63:0]);
+                    checkpoint_end(arg_a,8'hff);
+                end
+                14: checkpoint_export(value[63:0],arg_a);
+                15: checkpoint_import(arg_a,arg_b,value[63:0],value[71:64]);
+                16: begin
+                    if (boot_open || s_login_ready || s_cmd_ready || s_rx_ready || m_tx_valid ||
+                        highest_order_ref != 0 || pending_count != 0 || live_count != 0 || next_sequence != 1)
+                        $fatal(1,"cold gate opened or leaked partially restored state");
+                end
                 default: $fatal(1, "unknown action %0d", action);
             endcase
             stimulus_index = stimulus_index + 1;
@@ -457,9 +619,11 @@ module tb_ouch_order_session #(
         if (input_columns > 0 || !$feof(notice_file))
             $fatal(1, "unconsumed expected notice");
         input_columns = $fscanf(aborted_file, "%d", trailing);
-        if (input_columns > 0 || !$feof(aborted_file) || checked_aborts != 2)
+        if (input_columns > 0 || !$feof(aborted_file) || (!RECOVERABLE && checked_aborts != 2))
             $fatal(1, "unconsumed expected partial TX prefix");
-        if (m_tx_valid || m_notice_valid || !tx_stalls || !notice_stalls || !receive_stalls ||
+        if (m_tx_valid || m_notice_valid ||
+            (!RECOVERABLE && (!tx_stalls || !notice_stalls || !receive_stalls)) ||
+            (RECOVERABLE && (!archive_stalls || checkpoint_results < 5)) ||
             observed_packet_length != 0)
             $fatal(1, "test did not drain or missed a stalled boundary");
         $display("PASS OUCH session slots=%0d: %0d exact TX packets, %0d notices, %0d state barriers, %0d input beats",

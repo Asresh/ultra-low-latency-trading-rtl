@@ -161,6 +161,15 @@ package ouch_wire_pkg;
     } order_state_t;
 
     typedef struct packed {
+        logic ended;
+        logic killed;
+        logic market_open;
+        logic [31:0] highest_order_ref;
+        logic [63:0] next_sequence;
+        logic [79:0] session_id;
+    } checkpoint_meta_t;
+
+    typedef struct packed {
         logic [31:0] socket_frames;
         logic [31:0] decoded_events;
         logic [31:0] replayed;

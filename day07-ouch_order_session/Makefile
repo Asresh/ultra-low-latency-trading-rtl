@@ -112,11 +112,63 @@ replay-waveform: build/replay-5.vvp
 		--start 8200 --end 16050 --title 'OUCH replay divergence retains the committed cursor and verification fence' \
 		--signal 'tb_ouch_order_session.transport_up=TCP Link Up' \
 		--signal 'tb_ouch_order_session.replaying=Replaying' \
-		--signal 'tb_ouch_order_session.dut.replay_fenced=Verification Required' \
-		--signal 'tb_ouch_order_session.dut.socket_cursor=Socket Sequence' \
+		--signal 'tb_ouch_order_session.replay_fence_probe=Verification Required' \
+		--signal 'tb_ouch_order_session.socket_cursor_probe=Socket Sequence' \
 		--signal 'tb_ouch_order_session.next_sequence=Committed Next' \
 		--signal 'tb_ouch_order_session.last_fault=Fault Code' \
 		--signal 'tb_ouch_order_session.close_transport=Close TCP Link'
 
 clean:
 	rm -rf build
+
+CHECKPOINT_SLOTS := 1 4 8 12
+CHECKPOINT_TESTS := $(addprefix test-checkpoint-,$(CHECKPOINT_SLOTS))
+CHECKPOINT_IMAGES := $(addprefix build/checkpoint-,$(addsuffix .vvp,$(CHECKPOINT_SLOTS)))
+
+.PHONY: test-checkpoint lint-checkpoint synth-checkpoint formal-checkpoint checkpoint-waveform
+.PHONY: $(CHECKPOINT_TESTS)
+
+test: test-checkpoint
+lint: lint-checkpoint
+synth: synth-checkpoint
+waveform: checkpoint-waveform
+
+test-checkpoint: $(CHECKPOINT_TESTS)
+	$(PYTHON) -B -m unittest test_ouch_checkpoint
+
+$(CHECKPOINT_TESTS): test-checkpoint-%: build/checkpoint-%.vvp
+	$(PYTHON) -B gen_checkpoint_vectors.py generate build/checkpoint-$* --slots $*
+	$(VVP) $< +vectors=build/checkpoint-$* +stall_seed=30721
+	$(PYTHON) -B gen_checkpoint_vectors.py check build/checkpoint-$* --save build/checkpoint-$*/hardware_archive.ocp
+	$(PYTHON) -B ouch_audit.py check-tx build/checkpoint-$*/hardware_tx.hex build/checkpoint-$*/tx.txt
+
+$(CHECKPOINT_IMAGES): build/checkpoint-%.vvp: $(RTL) tb_ouch_order_session.sv rtl.f | build
+	$(IVERILOG) $(VFLAGS) -s tb_ouch_order_session -Ptb_ouch_order_session.ORDER_SLOTS=$* \
+		-Ptb_ouch_order_session.RECOVERABLE=1 -Ptb_ouch_order_session.REPLAY_HISTORY_DEPTH=5 \
+		-o $@ -f rtl.f tb_ouch_order_session.sv
+
+lint-checkpoint:
+	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module ouch_recoverable_session -f rtl.f
+	$(VERILATOR) --lint-only -Wall -Wno-UNUSEDSIGNAL --top-module ouch_recoverable_session -GORDER_SLOTS=1 -GREPLAY_HISTORY_DEPTH=1 -f rtl.f
+
+synth-checkpoint: | build
+	$(YOSYS) -Q -q -T -m slang -l build/checkpoint-synth.log -p 'read_slang --top ouch_recoverable_session $(RTL); synth -top ouch_recoverable_session -noabc; check -assert; stat'
+
+formal-checkpoint: | build
+	$(YOSYS) -Q -q -T -m slang -l build/checkpoint-formal.log -p 'read_slang --formal -D FORMAL --top ouch_checkpoint_stream -G ORDER_SLOTS=1 ouch_wire_pkg.sv ouch_checkpoint_validate.sv ouch_checkpoint_stream.sv; prep; memory_map; flatten; async2sync; chformal -lower; opt; sat -seq 15 -set-at 1 rst 1 -set-assumes -prove-asserts -verify'
+
+checkpoint-waveform: build/checkpoint-8.vvp
+	$(PYTHON) -B gen_checkpoint_vectors.py generate build/checkpoint-wave
+	$(VVP) $< +vectors=build/checkpoint-wave +stall_seed=30721 +waves=build/checkpoint-wave/session.vcd
+	$(PYTHON) -B gen_checkpoint_vectors.py check build/checkpoint-wave
+	$(PYTHON) -B ouch_audit.py check-tx build/checkpoint-wave/hardware_tx.hex build/checkpoint-wave/tx.txt
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/checkpoint-wave/session.vcd checkpoint-waveform.svg \
+		--start 31500 --end 38300 --title 'A verified checkpoint publishes all restored state before retry traffic' \
+		--signal 'tb_ouch_order_session.cp_in_last=Import footer offered' \
+		--signal 'tb_ouch_order_session.checkpoint_busy=Checkpoint busy' \
+		--signal 'tb_ouch_order_session.cp_result_valid=Checkpoint result' \
+		--signal 'tb_ouch_order_session.cp_result_status=Result code' \
+		--signal 'tb_ouch_order_session.boot_open=Boot permit' \
+		--signal 'tb_ouch_order_session.next_sequence=Committed next' \
+		--signal 'tb_ouch_order_session.pending_count=Pending commands' \
+		--signal 'tb_ouch_order_session.m_tx_valid=Network TX'

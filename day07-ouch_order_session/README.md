@@ -99,6 +99,12 @@ python3 -B ouch_audit.py audit fixtures/audit_example.jsonl --replay-depth 5 --d
 
 The five-row capture starts with committed next sequence 10. An interrupted replay verifies through sequence 8 at 10,205 ns. The replayed execution at sequence 9 differs at 12,725 ns, raising code `0x1E` while the committed cursor stays at 10. The next socket supplies the original bytes and clears the verification fence at 15,005 ns. Its first new sequenced event then advances the committed next sequence to 11 at 15,645 ns.
 
+## Cold recovery from a durable checkpoint
+
+[ouch_recoverable_session.sv](ouch_recoverable_session.sv) boots with order entry and transport blocked. An operator can select a fresh session or restore a versioned checkpoint carrying the pinned Soup session, committed next sequence, full order slots, unresolved command bytes, and the order-reference fence. The checkpoint engine stages and validates the complete image before exposing any restored state. The matched pending command can then be retried under the same identity after the peer confirms the saved cursor.
+
+See the [checkpoint format, hardware interface, recovery example, and checked waveform](checkpoint-recovery.md). Run `make test-checkpoint` to export RTL data, simulate a reset with corrupt and partial imports, restore the captured image and verify the retried venue packets. The original `ouch_order_session` remains the direct entry point for an adapter that manages its reset and reconciliation externally.
+
 ## Wire subset
 
 Lengths below are the Soup length field. OUCH integers are network-endian. Fixed-width text is transmitted in its specified byte order. Prices use four implied decimal places. The supported positive limit range ends at 1,999,999,900 integer units.
@@ -177,7 +183,7 @@ The audited ECP5 build routed at **27.49 MHz**, below the 100 MHz constraint, wi
 
 The 64-bit ready/valid ports accept eight selected bytes in a handshake. Header and frame retirement consume additional clocks. Worst-case packet rate depends on message size, fragmentation, notice backpressure, and the CAM and barrel-shift paths. The raw port width is therefore separate from an achieved payload throughput number. The order table scans for peer refs and should use a banked or indexed lookup when scaled. The timing target excludes TCP, packet I/O, and board routes.
 
-The core operates on synthetic bytes or an adapter supplied by the integrator. It does not open external connections or provision accounts. A production integration would need a durable checkpoint and journal, venue certification, system-level safety limits, and a separately validated TCP/network path. Hardware reset clears this project's retained session and replay history.
+The core operates on synthetic bytes or an adapter supplied by the integrator. It does not open external connections or provision accounts. A complete integration still needs venue certification, system-level safety controls, a separately validated TCP path, and durable retention of any commands accepted after the last checkpoint. Hardware reset clears in-memory session state. The recoverable top can reconstruct validated state from a supplied checkpoint image.
 
 ## From the RTL simulation
 
@@ -185,4 +191,4 @@ The core operates on synthetic bytes or an adapter supplied by the integrator. I
 
 The directed reconnect requests replay from sequence 2 while the saved live cursor is 4. A retry made during replay yields a local notice at 13685 ns. The server replays earlier messages while the live cursor stays at 4. Replay clears at 14265 ns, the retried command can transmit, and its next live server message advances the cursor to 5 at 14945 ns. The test checks parsed state, notices and transmitted wire bytes.
 
-Run `make waveform` to rerun the checked scenario and regenerate both figures. The full capture is available at `build/wave/session.vcd`.
+Run `make waveform` to rerun the checked scenario and regenerate the checked figures. The full capture is available at `build/wave/session.vcd`.

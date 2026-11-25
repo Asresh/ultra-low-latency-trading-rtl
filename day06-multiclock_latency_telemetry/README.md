@@ -208,6 +208,10 @@ The collector input is one line per transferred alert with decimal slot, decimal
 
 The first trip queues at 215 ns. Its code stays at 1 while the host holds ready low and the queue fills at 235 ns. Four subsequent transitions increase the loss count between 245 and 275 ns. Ready rises at 280 ns, and on the next reference edge the old head transfers while a new alert is written. Occupancy remains three on that edge. The VCD is generated at `build/wave/deadline.vcd`.
 
+## PPS frequency discipline
+
+The optional hardware PPS front-end measures raw tick intervals, filters jitter, and feeds bounded period updates to the existing timebase. It keeps a sequenced audit for exact host conversion across period changes and validates the full loop with an asynchronous PPS input. [Control, hardware and waveform details](pps-discipline.md)
+
 ## Verification evidence
 
 | Test | Reproduced behavior |
@@ -239,4 +243,4 @@ Structural synthesis completed with 74,941 generic cells on the default geometry
 
 The two probe 0 observations carry tag 55 (0x37). The first reports status 0 (start stored) and the second reports status 2 (duplicate start). Probe 1 then supplies the end marker and produces status 1 at 1705 ns. The checker also compares the start and stop probe IDs and the encoded latency. The valid and end masks identify the originating asynchronous lanes.
 
-Run `make waveform` to rerun the checked scenarios and regenerate both figures. The full capture is available at `build/wave/telemetry.vcd`.
+Run `make waveform` to rerun the checked scenarios and regenerate the figures. The full capture is available at `build/wave/telemetry.vcd`.

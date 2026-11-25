@@ -1,0 +1,15 @@
+`ifndef QUOTE_INVENTORY_CODES_SVH
+`define QUOTE_INVENTORY_CODES_SVH
+`define QI_OK 4'd0
+`define QI_BAD_INSTRUMENT 4'd1
+`define QI_STALE_EPOCH 4'd2
+`define QI_BAD_POLICY 4'd3
+`define QI_EPOCH_EXHAUSTED 4'd4
+`define QI_FENCED 4'd5
+`define QI_DUPLICATE 4'd6
+`define QI_CONFLICT 4'd7
+`define QI_OLD 4'd8
+`define QI_GAP 4'd9
+`define QI_ZERO_FILL 4'd10
+`define QI_POSITION_OVERFLOW 4'd11
+`endif

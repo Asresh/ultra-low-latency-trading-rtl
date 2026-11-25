@@ -5,3 +5,6 @@ passive_quote_policy.sv
 quote_publication.sv
 quote_publication_pipeline.sv
 market_state_quote_engine.sv
+quote_inventory_ledger.sv
+quote_inventory_overlay.sv
+quote_inventory_manager.sv

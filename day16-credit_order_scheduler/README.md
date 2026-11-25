@@ -5,6 +5,9 @@ This RTL block arbitrates traffic from several classes onto a shared order egres
 
 The [leased credit scheduler](leases.md) adds a single-use completion
 token to each transmitted order and applies its exact refund once.
+The optional [causal order gate](causal-gate.md) delays a dependent
+order until an earlier same-session command has a confirmed success,
+while independent sessions continue dispatching.
 
 ## Where it fits
 

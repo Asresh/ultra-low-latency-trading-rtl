@@ -1,0 +1,23 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 18
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top causal_order_gate -D FORMAL_CAUSAL -G SESSIONS=2 -G WINDOW=2 -G EPOCH_W=2 -G SEQ_W=3 -G TTL_W=4 -G CREDIT_W=3 -G TAG_W=4 -G PAYLOAD_W=4 causal_order_gate.sv
+prep -top causal_order_gate
+memory_map
+setundef -undriven -anyseq
+opt
+check -assert
+
+[files]
+causal_order_gate.sv

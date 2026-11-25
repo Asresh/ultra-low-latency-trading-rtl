@@ -1,0 +1,29 @@
+[tasks]
+dispatch_bmc dispatch bmc
+dispatch_cover dispatch cover
+pipeline_bmc pipeline bmc
+pipeline_cover pipeline cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 18
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+dispatch: read_slang --top eth_mac_dispatch -D FORMAL_DISPATCH eth_mac_dispatch.sv
+dispatch: prep -top eth_mac_dispatch
+pipeline: read_slang --top eth_next_hop_pipeline -D FORMAL_ROUTE_PIPELINE -G SLOTS=3 -G ROWS=3 -G TAG_W=4 -G EPOCH_W=2 eth_next_hop_pipeline.sv eth_ipv4_route.sv
+pipeline: prep -top eth_next_hop_pipeline
+memory_map
+setundef -undriven -anyseq
+opt
+check -assert
+
+[files]
+../eth_mac_dispatch.sv
+../eth_next_hop_pipeline.sv
+../eth_ipv4_route.sv

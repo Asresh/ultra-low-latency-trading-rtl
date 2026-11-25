@@ -4,6 +4,43 @@ A synthesizable, full-duplex MAC client endpoint for FPGA trading systems. It ve
 
 The data-plane top is [`ethernet_udp_frontend.sv`](ethernet_udp_frontend.sv). The optional [`eth_config_csr.sv`](eth_config_csr.sv) bridge translates a 32-bit host transaction stream into its native rule and statistics ports. [`rtl.f`](rtl.f) lists synthesizable files.
 
+
+The [routed UDP endpoint](routed-udp.md) connects the route lookup, ARP,
+MAC receive dispatch, and the existing UDP pipeline. Applications provide
+an IPv4 destination and an optional VLAN. The endpoint resolves the next
+hop, schedules complete frames on one MAC, and reports the selected policy
+epoch with each outbound result.
+
+## IPv4 unicast neighbor resolution
+
+[`eth_arp_endpoint`](eth_arp_endpoint.sv) is a single-clock ARP MAC client alongside the IPv4/UDP frontend. It resolves a next-hop IPv4 address to a destination MAC that the application can put into the existing TX descriptor. Route incoming EtherType 0x0806 frames to the ARP MAC port and IPv4 frames to the UDP frontend. Share the physical transmit MAC through a packet-locked arbiter when both clients can send. The application supplies the next hop, which may be the destination on the local subnet or a gateway on that VLAN. [Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)
+
+For example, a feed handler can use a resolved gateway MAC for a unicast recovery request and share that resolution with other queued packets. Distinct tagged VLANs can use overlapping private IPv4 addresses without sharing the cached MAC. The endpoint also responds to ARP requests for its configured local IP, so a peer can reach a local unicast UDP test service on the same link.
+
+| Interface | Behavior |
+| --- | --- |
+| Lookup `s_*` | Offer `s_ip`, `s_tagged`, `s_vid` and a caller-owned cookie. On transfer, the endpoint accepts one request. It ignores VID on an untagged lookup. Priority-tagged VLAN 0 remains distinct from untagged traffic. |
+| Lookup result `m_*` | Each accepted request eventually produces one cookie and status. Status 0 resolves the MAC, 1 reports retry timeout, 2 reports full pending rows or waiter slots, and 3 reports an invalid lookup address or VLAN. Replies can complete out of order across neighbors. Within one pending neighbor, coalesced requests retain arrival order. |
+| ARP MAC receive | Accepts Ethernet II ARP with no VLAN or one 0x8100 tag and complete MAC framing. It checks the Ethernet and ARP addresses and fields before queueing a reply or accepting a learned identity. MAC clients exclude preamble and FCS. |
+| ARP MAC transmit | Emits byte-exact 60-byte request or reply frames with zero padding. A probe handshake into the resolver occurs after the final MAC beat transfers. MAC stalls therefore consume no retry attempts. |
+| Reset | Cancels pending lookups and held packets, clears learned state and counters. The upstream caller must discard outstanding cookies across reset. |
+
+The default associative geometry is eight cached neighbors, four independent pending targets, four waiters per target, three transmitted probes, a 32-cycle retry interval and a 1,024-cycle cache lifetime. Choose a retry interval based on elapsed link and peer response time, and size the cache for the expected neighbor population. Lookups use the link-local identity configured by `LOCAL_MAC` and `LOCAL_IP`. The valid bits retire expired cache entries and all pending timers use modulo-32-bit cycle subtraction. Configure positive capacities, timeout and lifetime values. A matching reply presented before the expiry edge takes priority over a new lookup. A held retry reserves its pending slot until its MAC packet has transferred. A delayed reply can resolve the waiters and deliver their results while that redundant retry remains stalled.
+
+An accepted reply needs an outstanding probe transmitted for the same IP and VLAN and must address the local endpoint. These checks correlate the reply with pending state. ARP carries no transaction ID, so a matching delayed reply can satisfy a fresh probe for the same key. The network edge is responsible for VLAN admission, isolation and any authenticated neighbor policy.
+
+![RTL capture showing completion of a stalled request probe, a VLAN-scoped reply, and coalesced lookup results](arp-waveform.svg)
+
+The MAC accepts the probe's final beat at 1475 ns. The first reply carries a different VLAN and leaves the learned count unchanged. The matching reply updates the neighbor at 1715 ns. Cookies `0x65` and `0x66` then retire in order. `make test-arp` checks all nine emitted frames against an independent Python encoder and tests both retry races. `make waveform-arp` reruns the integration check and regenerates this image from `build/arp.vcd`.
+
+### Selecting the next hop
+
+[`eth_ipv4_route`](eth_ipv4_route.sv) accepts a destination IPv4 address, VLAN scope and cookie. It selects a route in that scope by longest matching prefix. The lowest row wins a tie. A route with gateway zero uses the destination itself as the next hop. A reject rule terminates lookup, including if a less-specific rule would have accepted it. Result status 0 carries a next hop for ARP. Statuses 1, 2 and 3 denote miss, reject and invalid destination respectively. In miss and invalid results the row field is all ones.
+
+Set `cfg_enabled`, `cfg_tagged`, `cfg_vid`, `cfg_network`, `cfg_prefix`, `cfg_reject` and `cfg_gateway` on a write to a shadow row. Enabled writes require a canonical network prefix and a unicast gateway or zero. Invalid accepted writes pulse `cfg_error` and preserve the preceding shadow row. An accepted commit with `commit_valid` swaps the banks and increments the reported epoch. Commit takes priority over a concurrent write. A lookup transferred on the commit edge uses the old table and tags its reply with the old epoch. The old table becomes the next shadow, so rewrite all intended rows before a complete policy replacement.
+
+A VLAN 24 table might route `192.0.2.0/24` directly, reject `192.0.2.88/32`, and send other remote addresses through `192.0.2.1`. The caller uses only a successful next-hop result as input to ARP and keeps its original UDP destination address. Use `make test-route` to compare eight- and eleven-row RTL configurations against the Python IPv4 network model over directed cases and independent randomized drive tapes.
+
 ## Run
 
 ```sh

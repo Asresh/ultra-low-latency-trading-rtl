@@ -4,6 +4,11 @@ Compute the gross amount of an order, its fee, and the cash amount. A fixed-poin
 
 The optional [basket calculator](basket.md) combines individually rounded
 legs and checks the signed net debit or minimum proceeds of a package.
+The [tiered fee settlement engine](fee-tiers.md) applies marginal maker
+or taker rates, including signed rebates, across an execution's actual
+turnover bands before rounding the fee. A separate [FX cash converter](fx-cash.md)
+uses a versioned rate sheet to translate signed cash directly or through
+an explicit pivot currency.
 
 ```mermaid
 flowchart LR

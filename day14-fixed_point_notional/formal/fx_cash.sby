@@ -1,0 +1,23 @@
+[tasks]
+bmc
+cover
+
+[options]
+bmc: mode bmc
+cover: mode cover
+depth 12
+
+[engines]
+smtbmc boolector
+
+[script]
+plugin -i slang
+read_slang --top fx_cash_converter -D FORMAL_FX -G CURRENCIES=3 -G ROWS=4 -G RATE_W=5 -G RATE_FRAC=2 -G TIME_W=5 -G EPOCH_W=2 fx_cash_converter.sv
+prep -top fx_cash_converter
+memory_map
+setundef -undriven -anyseq
+opt
+check -assert
+
+[files]
+../fx_cash_converter.sv

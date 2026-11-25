@@ -1,0 +1,11 @@
+`ifndef ROUTED_CODES_SVH
+`define ROUTED_CODES_SVH
+`define ROUTED_TX_NO_ROUTE    8'd33
+`define ROUTED_TX_REJECT      8'd34
+`define ROUTED_TX_BAD_ADDRESS 8'd35
+`define ROUTED_TX_ARP_TIMEOUT 8'd36
+`define ROUTED_TX_ARP_BUSY    8'd37
+`define ROUTED_TX_ARP_BAD     8'd38
+`define ROUTED_TX_GROUP_DENY  8'd39
+`define ROUTED_TX_STALE_EPOCH 8'd40
+`endif

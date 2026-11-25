@@ -4,6 +4,13 @@ A synthesizable, full-duplex MAC client endpoint for FPGA trading systems. It ve
 
 The data-plane top is [`ethernet_udp_frontend.sv`](ethernet_udp_frontend.sv). The optional [`eth_config_csr.sv`](eth_config_csr.sv) bridge translates a 32-bit host transaction stream into its native rule and statistics ports. [`rtl.f`](rtl.f) lists synthesizable files.
 
+
+The [routed UDP endpoint](routed-udp.md) connects the route lookup, ARP,
+MAC receive dispatch, and the existing UDP pipeline. Applications provide
+an IPv4 destination and an optional VLAN. The endpoint resolves the next
+hop, schedules complete frames on one MAC, and reports the selected policy
+epoch with each outbound result.
+
 ## IPv4 unicast neighbor resolution
 
 [`eth_arp_endpoint`](eth_arp_endpoint.sv) is a single-clock ARP MAC client alongside the IPv4/UDP frontend. It resolves a next-hop IPv4 address to a destination MAC that the application can put into the existing TX descriptor. Route incoming EtherType 0x0806 frames to the ARP MAC port and IPv4 frames to the UDP frontend. Share the physical transmit MAC through a packet-locked arbiter when both clients can send. The application supplies the next hop, which may be the destination on the local subnet or a gateway on that VLAN. [Ethernet Address Resolution Protocol](https://www.rfc-editor.org/rfc/rfc826.html)

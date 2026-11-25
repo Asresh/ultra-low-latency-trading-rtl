@@ -10,3 +10,5 @@ latency_trace.sv
 latency_registers.sv
 latency_counter_bank.sv
 multiclock_latency_telemetry.sv
+latency_alert_fifo.sv
+latency_deadline_monitor.sv

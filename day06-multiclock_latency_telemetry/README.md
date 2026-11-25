@@ -137,6 +137,81 @@ The histogram header uses magic `LTS1`, a 32-bit sequence, and the 64-bit closin
 
 The trace header zeroes bits 319:160. Bits 159:128 hold `LTR1`; 127:96 sequence; 95:32 trigger tick; 31:24 retained record count; 23:16 the zero-based trigger offset; 15:13 trigger status; 12 denotes a latency-threshold trigger. Follow it with the retained result words. Reset abandons any partial frame. Snapshot and trace exports are ready/valid records rather than a PCIe, network, or storage protocol.
 
+## Path deadline monitor
+
+Attach [latency_deadline_monitor.sv](latency_deadline_monitor.sv) to the primary egress to detect sustained deadline misses by transaction stage. Connect `clk` to the system reference clock, provide a reset synchronized to that clock, and drive `sample_valid = event_valid && event_ready` and `sample_data = event_data`. There is no ready signal from the tap. The primary consumer retains control of `event_ready`. The monitor can classify one transferred report per clock edge.
+
+```mermaid
+flowchart LR
+    E["Accepted 320-bit report"] --> M["Lowest numbered matching path"]
+    C["Versioned policy commands"] --> M
+    M --> H["Deadline + trip/recovery streaks"]
+    H --> S["Counters + worst duration"]
+    H --> Q["Bounded alert queue"]
+    Q --> X["Host collector"]
+    Q -. "Full with no dequeue" .-> L["Increment loss"]
+    classDef rules fill:#ede9fe,stroke:#6d28d9,color:#2e1065
+    classDef path fill:#dcfce7,stroke:#15803d,color:#052e16
+    classDef host fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef loss fill:#ffedd5,stroke:#c2410c,color:#431407
+    class C,M rules
+    class E,H,S path
+    class Q,X host
+    class L loss
+```
+
+For example, place a start probe at book update acceptance and a stop probe at order-intent acceptance. Configure an exact rule for that class and directed probe pair. A limit of 100 raw ticks, trip streak of three, and recovery streak of five produce an alert after three consecutive late matched reports and clear it after five at or below the limit. A separate rule can cover order intent to egress. Build limits from the reference clock period and the existing probe-capture uncertainty. During deployment, correlate the rule revision and trigger tag with the primary capture. A singleton outlier remains visible in the breach counter and worst duration even if it never trips the alarm.
+
+Only status 1 (MATCH) contributes to rule counters or streaks. The path key is class, start probe, and stop probe. Set `ctl_wild[2:0]` to wildcard class, start, or stop respectively. Use a higher slot number for a broad fallback. Intervening reports of other paths or statuses leave a rule's streaks untouched. Durations greater than the limit are late and equality is healthy. Both streak counters saturate at 65,535. Rule counts and four global counts saturate at 2³²−1. The global counters record all reports, nonmatches, unmatched eligible paths, and lost alerts.
+
+| Control field | Contract |
+| --- | --- |
+| `ctl_valid/ctl_ready` | A rising edge accepts one complete command. The caller holds fields stable until the handshake. |
+| `ctl_op` | 0 PROGRAM, 1 INSPECT, 2 CLEAR. |
+| `ctl_rule` | One zero-based slot. The command bus can represent an out-of-range slot, which receives an error. |
+| `ctl_expected_revision` | PROGRAM and CLEAR do a compare-and-set. INSPECT can discover revision without a compare. Slot revisions start at zero and successful PROGRAM increments the revision. At the maximum revision, further PROGRAM requests fail until reset. |
+| `ctl_enable, ctl_class, ctl_start, ctl_stop, ctl_wild, ctl_limit, ctl_trip, ctl_recover` | PROGRAM replaces the policy on one edge and resets the slot's alarm and streaks. Enabled policies require positive trip and recovery thresholds. Lifetime rule counts and worst duration are retained. |
+| `reply_valid/reply_ready` | One registered response, held until accepted. The previous reply can transfer on the edge accepting a new command. |
+| `reply_status` | 0 success, 1 slot out of range, 2 stale revision, 3 invalid policy, 4 exhausted revision, 5 invalid operation. |
+| `reply_rule, reply_op, reply_revision, reply_data` | Echoes slot and operation. Revision reports the current value or the incremented value after successful PROGRAM. Data returns the previous snapshot. An out-of-range slot returns zero revision and data. |
+
+A report and PROGRAM accepted on the same edge use the old policy and tag any alert with the old revision. CLEAR resets the slot's statistics and worst duration, then assigns any coincident report to the new count interval. Alarm state, streaks, policy, and revision persist through CLEAR. The response reports state before that edge for every operation. Control-plane drivers should associate the reply with the echoed slot and operation and use INSPECT when they need a current snapshot after an update.
+
+| `reply_data` bits | Fields from high to low |
+| --- | --- |
+| 380:352 | Enabled, class, start probe, stop probe, wildcard mask, alarm state |
+| 351:288 | Deadline (64) |
+| 287:224 | Trip threshold (16), recovery threshold (16), late streak (16), healthy streak (16) |
+| 223:64 | Matches (32), breaches (32), trips (32), recoveries (32), lost alerts (32) |
+| 63:0 | Longest classified duration (64) |
+
+An alert goes to a bounded FIFO independent of the primary stream. If the FIFO is full and the current head transfers, a new transition can replace that slot on the same edge. If nothing transfers, a new transition is recorded in the state and counters and its export is dropped. A held output stays stable. The collector can poll alarm state and check losses when an alert sink has been slow. Revisions already in the FIFO are preserved after reprogramming. A monitor reset empties both channels and clears policies, revisions, and statistics. If a persistent collector spans resets, give its log a separate reset epoch since slot revisions start at zero again.
+
+`alert_rule` and `alert_revision` travel alongside `alert_data[255:0]`. The default geometry is four rules, eight FIFO entries, and 16-bit revisions. All three parameters are positive. Comparator and priority selection cost grows with rule count. The default monitor synthesizes as an independent logical top with a register-based alert FIFO. Physical timing and area require a mapped target.
+
+| `alert_data` bits | Field |
+| --- | --- |
+| 255:216 | Class (8), tag (16), start probe (8), stop probe (8) |
+| 215:192 | Event code (8), transition streak (16). Codes 1 and 2 are trip and recovery. |
+| 191:0 | Limit (64), duration (64), source processing tick (64) |
+
+```sh
+make test-deadline
+make synth-deadline
+python3 deadline_alert.py build/deadline-alerts.txt
+make waveform-deadline
+```
+
+The collector input is one line per transferred alert with decimal slot, decimal revision, and hexadecimal payload. The live multiclock bench writes `build/deadline-alerts.txt` and verifies two independently configured path alerts against exact primary reports. The host CLI validates transition codes, thresholds, payload bounds, and streaks before emitting JSON Lines. The three seeded cycle scoreboards compare handshakes, alert payloads, replies, occupancy, and global counters every edge.
+
+![Alert backpressure and continued deadline classification](deadline-waveform.svg)
+
+The first trip queues at 215 ns. Its code stays at 1 while the host holds ready low and the queue fills at 235 ns. Four subsequent transitions increase the loss count between 245 and 275 ns. Ready rises at 280 ns, and on the next reference edge the old head transfers while a new alert is written. Occupancy remains three on that edge. The VCD is generated at `build/wave/deadline.vcd`.
+
+## PPS frequency discipline
+
+The optional hardware PPS front-end measures raw tick intervals, filters jitter, and feeds bounded period updates to the existing timebase. It keeps a sequenced audit for exact host conversion across period changes and validates the full loop with an asynchronous PPS input. [Control, hardware and waveform details](pps-discipline.md)
+
 ## Verification evidence
 
 | Test | Reproduced behavior |
@@ -147,7 +222,8 @@ The trace header zeroes bits 319:160. Bits 159:128 hold `LTR1`; 127:96 sequence;
 | Four-probe burst | 3,600 ordered observations under multi-lane arbitration and 2,755 report stall cycles. Simulated maximum raw-tick lag by lane was 2, 5, 5, and 8 ticks. |
 | Control | 361 writes, 397 reads, disordered AW/W arrival, and 718 edges with both responses valid. The integrated bench also checks fractional rate change, PPS overrun, and old-epoch discard. |
 | Exports | Four exact histogram snapshots with 276 samples, a simultaneous bank swap and sample, two standalone triggered frames, and cross-validation of the primary stream with both integrated trace frames. The integrated test also aligns a trigger with an accepted trace rearm and verifies that the new capture starts with the next report. |
-| Host tools | 26 unit tests covering fixed-point rounding, invalid encodings, CDF and path budgets, histogram censoring, robust PPS estimation, and 450 independently integrated rate-change intervals. |
+| Deadline monitor | 12,146 compared cycles across 1, 3, and 4 rule slots and 1, 3, and 8 alert entries. The benches include full-queue replacement, overflow, revisions and stalls. The live tap verifies both complete alerts from independent paths against captured primary transfers. |
+| Host tools | Nine deadline model and decoder tests and 26 unit tests covering fixed-point rounding, invalid encodings, CDF and path budgets, histogram censoring, robust PPS estimation, and 450 independently integrated rate-change intervals. |
 
 The [cycle model](latency_reference.py) and [vector generator](gen_latency_vectors.py) are independent of the RTL storage implementation. [verify_latency_capture.py](verify_latency_capture.py) reconstructs histogram statistics from accepted report ticks and verifies each trace as a contiguous subsequence of the primary stream.
 
@@ -167,4 +243,4 @@ Structural synthesis completed with 74,941 generic cells on the default geometry
 
 The two probe 0 observations carry tag 55 (0x37). The first reports status 0 (start stored) and the second reports status 2 (duplicate start). Probe 1 then supplies the end marker and produces status 1 at 1705 ns. The checker also compares the start and stop probe IDs and the encoded latency. The valid and end masks identify the originating asynchronous lanes.
 
-Run `make waveform` to rerun the checked scenario and regenerate the figure. The full capture is available at `build/wave/telemetry.vcd`.
+Run `make waveform` to rerun the checked scenarios and regenerate the figures. The full capture is available at `build/wave/telemetry.vcd`.

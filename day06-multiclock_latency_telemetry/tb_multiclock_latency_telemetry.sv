@@ -44,6 +44,50 @@ module tb_multiclock_latency_telemetry;
         .SCAN_LOG(2), .HIST_BINS(12), .TRACE_ADDRESS_W(3)
     ) dut (.*);
 
+    logic deadline_ctl_valid = 0, deadline_rule = 0, deadline_alert_ready = 0;
+    wire deadline_ctl_ready, deadline_reply_valid, deadline_alert_valid, deadline_alert_rule;
+    wire [2:0] deadline_reply_status;
+    wire [3:0] deadline_reply_revision, deadline_alert_revision;
+    wire [255:0] deadline_alert_data;
+    wire [31:0] deadline_seen, deadline_nonmatches, deadline_unclassified, deadline_lost;
+    integer deadline_file, deadline_count = 0;
+
+    latency_deadline_monitor #(.RULES(2), .ALERT_DEPTH(2), .REV_W(4)) deadlines (
+        .clk(ref_clk), .rst(dut.ref_reset),
+        .sample_valid(event_valid && event_ready), .sample_data(event_data),
+        .ctl_valid(deadline_ctl_valid), .ctl_ready(deadline_ctl_ready),
+        .ctl_op(2'd0), .ctl_rule({1'b0,deadline_rule}), .ctl_expected_revision(4'd0),
+        .ctl_enable(1'b1), .ctl_class(deadline_rule ? 8'd0 : 8'd1),
+        .ctl_start(deadline_rule ? 8'd1 : 8'd0), .ctl_stop(deadline_rule ? 8'd2 : 8'd1),
+        .ctl_wild(3'd0), .ctl_limit(64'd0), .ctl_trip(16'd1), .ctl_recover(16'd1),
+        .reply_valid(deadline_reply_valid), .reply_ready(1'b1),
+        .reply_status(deadline_reply_status), .reply_op(), .reply_rule(),
+        .reply_revision(deadline_reply_revision), .reply_data(), .alert_valid(deadline_alert_valid),
+        .alert_ready(deadline_alert_ready), .alert_rule(deadline_alert_rule),
+        .alert_revision(deadline_alert_revision), .alert_data(deadline_alert_data),
+        .alert_occupancy(), .seen_reports(deadline_seen), .nonmatches(deadline_nonmatches),
+        .unclassified(deadline_unclassified), .lost_alerts(deadline_lost)
+    );
+
+    task automatic install_deadline(input logic rule_slot);
+        @(negedge ref_clk);
+        deadline_rule = rule_slot;
+        deadline_ctl_valid = 1;
+        do @(posedge ref_clk); while (!deadline_ctl_ready);
+        @(negedge ref_clk);
+        deadline_ctl_valid = 0;
+        if (!deadline_reply_valid || deadline_reply_status != 0 || deadline_reply_revision != 1)
+            $fatal(1, "Deadline policy did not install for slot %0d",rule_slot);
+    endtask
+
+    always @(posedge ref_clk) begin
+        if (deadline_alert_valid && deadline_alert_ready) begin
+            $fdisplay(deadline_file,"%0d %0d %064h",
+                      deadline_alert_rule,deadline_alert_revision,deadline_alert_data);
+            deadline_count++;
+        end
+    end
+
     string folder;
     integer event_file, timing_file, hist_file, trace_file;
     integer report_count = 0, trace_frames = 0, hist_frames = 0;
@@ -273,6 +317,14 @@ module tb_multiclock_latency_telemetry;
         end
     end
 
+    initial begin : deadline_setup
+        @(posedge power_reset);
+        @(negedge power_reset);
+        wait (&probe_ready);
+        install_deadline(0);
+        install_deadline(1);
+    end
+
     initial begin : scenario
         logic [31:0] value;
         logic [63:0] ns_before;
@@ -283,7 +335,8 @@ module tb_multiclock_latency_telemetry;
         timing_file = $fopen({folder, "/transfers.hex"}, "w");
         hist_file = $fopen({folder, "/histogram.hex"}, "w");
         trace_file = $fopen({folder, "/trace.hex"}, "w");
-        if (!event_file || !timing_file || !hist_file || !trace_file)
+        deadline_file = $fopen({folder, "/deadline-alerts.txt"}, "w");
+        if (!event_file || !timing_file || !hist_file || !trace_file || !deadline_file)
             $fatal(1, "Cannot write capture files");
         for (integer lane = 0; lane < PROBES; lane++) probe_count[lane] = 0;
         #1;
@@ -403,6 +456,14 @@ module tb_multiclock_latency_telemetry;
                  report_count, trace_frames, hist_frames, axi_reads, axi_writes);
         $display("Probe accepts %0d/%0d/%0d; held event/trace/hist %0d/%0d/%0d",
                  probe_count[0],probe_count[1],probe_count[2],event_stalls,trace_stalls,hist_stalls);
+        if (deadline_seen != report_count || deadline_nonmatches != deadline_seen - 2 ||
+            deadline_unclassified || deadline_lost || !deadline_alert_valid)
+            $fatal(1, "Deadline transfer counts differ from the primary stream");
+        deadline_alert_ready = 1;
+        repeat (3) @(negedge ref_clk);
+        if (deadline_count != 2 || deadline_alert_valid)
+            $fatal(1, "Deadline alerts failed to drain after the trading datapath scenario");
+        $fclose(deadline_file);
         $fclose(event_file);
         $fclose(timing_file);
         $fclose(hist_file);

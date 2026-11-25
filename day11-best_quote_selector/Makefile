@@ -69,3 +69,47 @@ waveform: build/default.vvp ../scripts/render_vcd_waveform.py
 		--signal 'tb_best_quote_selector.result_bid_price=Best bid' \
 		--signal 'tb_best_quote_selector.result_ask_price=Best ask' \
 		--signal 'tb_best_quote_selector.result_spread=Signed spread bits'
+
+.PHONY: test-sweep lint-sweep synth-sweep sweep-waveform
+
+SWEEP_SOURCES = quote_store.sv quote_sweep_plan.sv quote_sweep_selector.sv
+SWEEP_IMAGES = $(addprefix build/sweep-,$(addsuffix .vvp,$(PROFILES)))
+SWEEP_TESTS = $(addprefix test-sweep-,$(PROFILES))
+.PHONY: $(SWEEP_TESTS)
+
+test: test-sweep
+lint: lint-sweep
+synth: synth-sweep
+waveform: sweep-waveform
+
+test-sweep: $(SWEEP_TESTS)
+
+$(SWEEP_TESTS): test-sweep-%: build/sweep-%.vvp
+	$(PYTHON) -B quote_sweep_vectors.py --profile $* --image $< --output build/sweep-$* --vvp "$(VVP)"
+
+$(SWEEP_IMAGES): build/sweep-%.vvp: $(SWEEP_SOURCES) quote_codes.svh quote_sweep_codes.svh tb_quote_sweep_selector.sv | build
+	@set -e; params=$$($(PYTHON) -B quote_tool.py parameters --profile $*); \
+	params=$$(printf '%s\n' "$$params" | sed 's/tb_best_quote_selector/tb_quote_sweep_selector/g'); \
+	$(IVERILOG) -g2012 -s tb_quote_sweep_selector $$params -o $@ $(SWEEP_SOURCES) tb_quote_sweep_selector.sv
+
+lint-sweep:
+	$(VERILATOR) --lint-only -Wall --top-module quote_sweep_selector $(SWEEP_SOURCES)
+	$(VERILATOR) --lint-only -Wall --top-module quote_sweep_selector -GINSTRUMENTS=1 -GVENUES=1 $(SWEEP_SOURCES)
+
+synth-sweep: | build
+	$(YOSYS) -Q -q -l build/sweep-synth.log -p 'read_verilog -sv $(SWEEP_SOURCES); hierarchy -check -top quote_sweep_selector; synth -top quote_sweep_selector -noabc; check -assert; stat'
+
+sweep-waveform: build/sweep-default.vvp ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B quote_sweep_vectors.py --profile default --image $< --output build/sweep-demo --vvp "$(VVP)" --demo --waveform build/sweep-demo.vcd
+	mkdir -p docs
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/sweep-demo.vcd docs/sweep-waveform.svg \
+		--start 14 --end 113 --title 'Fee-aware sweep captures quotes and policy before the commit edge' \
+		--signal 'tb_quote_sweep_selector.commit_valid=Policy commit' \
+		--signal 'tb_quote_sweep_selector.policy_epoch=Active policy epoch' \
+		--signal 'tb_quote_sweep_selector.query_valid=Query valid' \
+		--signal 'tb_quote_sweep_selector.result_ready=Result ready' \
+		--signal 'tb_quote_sweep_selector.result_valid=Result valid' \
+		--signal 'tb_quote_sweep_selector.result_epoch=Sampled epoch' \
+		--signal 'tb_quote_sweep_selector.result_status=Outcome' \
+		--signal 'tb_quote_sweep_selector.first_venue=First child venue' \
+		--signal 'tb_quote_sweep_selector.result_quantity=Planned quantity'

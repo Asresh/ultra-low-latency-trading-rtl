@@ -90,6 +90,59 @@ The quote store uses independent per-row metadata and quote payloads. A snapshot
 
 The test bench measures one cycle from command acceptance to acknowledgement and two from query acceptance to an unstalled result. Every profile accepted one command and one query on each of 160 consecutive uncongested benchmark edges. These are simulation observations. The generic synthesis count is 7,085 cells, with area dominated by quote storage and read multiplexing. Clock frequency and board timing depend on implementation and constraints.
 
+## Size- and fee-aware sweep
+
+[quote_sweep_selector.sv](quote_sweep_selector.sv) uses the same validated quote store and adds an independent sweep interface. A sweep plans up to the requested quantity against the displayed best executable side at each venue. It snapshots the instrument, the caller's raw price bound, freshness, the venue mask, and the active signed fee and size-cap policy on one edge. The original BBO top remains available for one-result-per-cycle monitoring.
+
+```mermaid
+flowchart LR
+    MD["Quote updates"] --> Book["Validated quote store"]
+    C["Fee and cap writes"] --> Shadow["Shadow policy"]
+    Shadow -->|atomic commit| Policy["Live policy and epoch"]
+    Book --> Capture["One pre-edge snapshot"]
+    Policy --> Capture
+    Query["Buy or sell request"] --> Capture
+    Capture --> Rank["Eligible venue with best adjusted value"]
+    Rank --> Alloc["Allocate shares and accumulate value"]
+    Alloc -->|remaining demand and venues| Rank
+    Alloc --> Result["Ordered children and outcome"]
+    classDef shared fill:#dbeafe,stroke:#2563eb,color:#172554
+    classDef control fill:#fef3c7,stroke:#b45309,color:#451a03
+    classDef data fill:#dcfce7,stroke:#15803d,color:#052e16
+    class MD,Book shared
+    class C,Shadow,Policy,Query control
+    class Capture,Rank,Alloc,Result data
+```
+
+| Interface | Contract |
+| --- | --- |
+| `cfg_valid / cfg_ready` | Write one venue's enable, displayed-size cap and signed fee per share to the inactive bank. A zero cap makes that venue ineligible. Invalid venue indexes pulse `cfg_error` for one cycle and leave the bank intact. |
+| `commit_valid / commit_ready` | Swap policy banks and increment `policy_epoch` modulo its width. Commit takes priority over a simultaneous write, which the sender holds until ready. A query that transfers on the commit edge samples the old policy and old quotes. The old active bank becomes the next shadow bank. To replace a complete policy, write every shadow row before commit. |
+| `query_valid / query_ready` | Supply the instrument, tag, side (`query_buy=1` for a buy), quantity, positive raw price limit, maximum age, venue mask, and optional all-or-none planning. An ineligible venue may still report a stale quote if it has the requested side. |
+| `result_valid / result_ready` | Consume the stable plan, sampled tick and policy epoch, accepted-query tag, eligibility and stale masks, allocated quantity, aggregate net value and ordered children. Values are meaningful when valid is asserted. |
+
+Both policy banks start enabled with a maximum cap and a zero fee. The fee uses the same fixed-point price units per share as the raw displayed price. A buy qualifies ask prices at or below its raw ceiling and ranks lowest `ask + fee` first. A sell qualifies bid prices at or above its raw floor and ranks highest `bid - fee` first. Equal adjusted prices use the lower venue index. For each ranked venue, the planner allocates the minimum of displayed quantity, the venue cap, and remaining demand. A venue appears at most once. The signed aggregate is the sum of allocated shares times the adjusted cost for buys or net proceeds for sells. Signed rebates and negative totals are representable. The plan quantity width is `QTY_W + ceil(log2(VENUES))`.
+
+`result_eligible` marks every candidate passing the snapshot filters, including candidates beyond the allocated amount. `result_stale` marks enabled, present quotes that have the requested side and fail the modular age check. A child packs `{venue, raw price, allocated quantity, signed fee, quote sequence, age}` from most to least significant bits. The first child occupies the low record of `result_children`. Unused child records are zero.
+
+| Outcome | Meaning |
+| --- | --- |
+| 0 · filled | Plan covers the requested quantity. |
+| 1 · partial | Positive displayed liquidity qualified but ran out. |
+| 2 · no liquidity | No venue qualified on a partial-allowed request. |
+| 3 · all-or-none unfilled | The eligible amount is insufficient. Quantity, value and every child are zero. |
+| 4–7 · invalid query | Instrument out of range, ambiguous maximum age, zero quantity, or zero price limit, in that priority order. Masks, quantity, value and children are zero. |
+
+The engine advances one ranked child per clock. An unstalled plan with `N` allocation steps can transfer `N+1` edges after the query handshake. An invalid or empty query can transfer on the next edge. In a failed all-or-none plan the engine inspects every eligible candidate before returning an empty plan. Input can accept a new query on the edge that retires the prior result. Quotes and policy can keep changing while a plan computes or stalls. Reset clears pending responses, history, and policy state.
+
+One use in a venue gateway is to compare where a displayed 15-share buy could route within a raw limit while accounting for the adapter's per-venue marginal fees and caps. An execution adapter must still recheck quote identity and trading controls before handing off children because a visible plan represents an earlier snapshot. Displayed quantity can disappear and a set of children can receive different venue outcomes.
+
+![RTL waveform showing the atomic policy and quote update, then partial and all-or-none sweep outcomes](docs/sweep-waveform.svg)
+
+At 18 ns the quote update, policy commit, and first query transfer together. The first plan uses the pre-edge prices and epoch 0. The result becomes valid at 26 ns with venue 0 first and 17 shares at a net cost of 1,704 price units. It holds through backpressure until 42 ns. A later epoch 1 plan first chooses venue 1 with its rebate and returns 14 shares. The same 15-share request with all-or-none enabled returns zero. A subsequent sell plans nine shares for 891 price units in net proceeds.
+
+Run `make test-sweep` for cycle-by-cycle comparisons on the four quote-store geometries. [The reference planner](quote_sweep_model.py) sorts immutable book data and computes value with exact Python integers. The test bench compares all result bits and accepted operations against [the independent cycle prediction](quote_sweep_vectors.py). [The host tests](test_quote_sweep.py) also enumerate feasible allocations at small sizes to check economic optimality. Run `make sweep-waveform` to regenerate the figure from the directed checked demo. The ignored trace files under `build/sweep-demo/` retain all sampled fields.
+
 ## Reproduce
 
 Use Python 3.9+, Icarus Verilog, Verilator, and Yosys.
@@ -104,6 +157,7 @@ make demo
 
 - `make test` runs 136 Python tests, 32,768 exhaustive tournament vectors, and 32 co-simulation scenarios. The four geometry runs compare 15,564 sampled edges, 8,157 accepted commands, and 8,151 accepted queries. The scenarios cover every error code, reset while stalled, half-range checks, exact price extrema, and both output pipelines under backpressure. The demo adds a separately checked eight-query RTL replay.
 - `make formal` uses Yosys SAT to prove ranking and forwarding for all five-candidate inputs and to check system flow and payload invariants through seven arbitrary input edges after a reset constraint.
+- The sweep test compares 10,739 sampled edges across four profiles, including 5,343 accepted queries, signed fee and price extrema, command and policy races, backpressure, policy epoch wrap, age wrap and resets.
 - `make lint` checks the default and single-row geometries. `make synth` checks the default with generic synthesis.
 - Reports and raw traces appear in ignored `build/` paths.
 

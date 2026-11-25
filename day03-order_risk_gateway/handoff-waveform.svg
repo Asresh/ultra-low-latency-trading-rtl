@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="512" viewBox="0 0 1160 512" role="img" aria-labelledby="wave-title">
+<title id="wave-title">Venue handoff revokes a never-transferred order and unwinds its reservation</title>
+<style>
+text{fill:#12253b;font:13px ui-monospace,Menlo,Consolas,monospace}
+.title{font:600 24px system-ui,sans-serif}
+.sub,.axis{fill:#42566b}
+.ruler{stroke:#d2dfe8;stroke-width:1}
+.trace,.edge{fill:none;stroke:#06756f;stroke-width:2.3}
+.edge{opacity:.7}
+.unknown{fill:none;stroke:#987542;stroke-width:2;stroke-dasharray:4 3}
+.bus{fill:#e1f3ef;stroke:#06756f;stroke-width:1.5}
+.gap{fill:#fff2d6;stroke:#987542}
+.value{font-size:12px}
+</style>
+<rect width="100%" height="100%" rx="14" fill="#f5f9fc"/>
+<text x="28.00" y="38.00" class="title" text-anchor="start">Venue handoff revokes a never-transferred order and unwinds its reservation</text>
+<text x="28.00" y="64.00" class="sub" text-anchor="start">RTL simulation · bus values in hex · X/Z shown in amber</text>
+<rect x="22" y="80" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="105.00" class="" text-anchor="start">Link loss</text>
+<text x="32.00" y="148.00" class="" text-anchor="start">Venue allowed</text>
+<rect x="22" y="166" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="191.00" class="" text-anchor="start">Egress valid</text>
+<text x="32.00" y="234.00" class="" text-anchor="start">Egress ready</text>
+<rect x="22" y="252" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="277.00" class="" text-anchor="start">Egress applicable</text>
+<text x="32.00" y="320.00" class="" text-anchor="start">Audit valid</text>
+<rect x="22" y="338" width="1116" height="43" rx="4" fill="#ebf2f7"/>
+<text x="32.00" y="363.00" class="" text-anchor="start">Audit source</text>
+<text x="32.00" y="406.00" class="" text-anchor="start">Last firm snapshot</text>
+<path class="ruler" d="M218.00 80V426"/>
+<text x="218.00" y="450.00" class="axis" text-anchor="middle">175</text>
+<path class="ruler" d="M277.80 80V426"/>
+<text x="277.80" y="450.00" class="axis" text-anchor="middle">200</text>
+<path class="ruler" d="M397.41 80V426"/>
+<text x="397.41" y="450.00" class="axis" text-anchor="middle">250</text>
+<path class="ruler" d="M517.01 80V426"/>
+<text x="517.01" y="450.00" class="axis" text-anchor="middle">300</text>
+<path class="ruler" d="M636.62 80V426"/>
+<text x="636.62" y="450.00" class="axis" text-anchor="middle">350</text>
+<path class="ruler" d="M756.22 80V426"/>
+<text x="756.22" y="450.00" class="axis" text-anchor="middle">400</text>
+<path class="ruler" d="M875.83 80V426"/>
+<text x="875.83" y="450.00" class="axis" text-anchor="middle">450</text>
+<path class="ruler" d="M995.43 80V426"/>
+<text x="995.43" y="450.00" class="axis" text-anchor="middle">500</text>
+<path class="ruler" d="M1127.00 80V426"/>
+<text x="1127.00" y="450.00" class="axis" text-anchor="middle">555</text>
+<path class="bus" d="M218.00 100.00L223.00 88.00H583.78L588.78 100.00L583.78 112.00H223.00Z"/>
+<text x="403.39" y="104.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M588.78 100.00L593.78 88.00H1110.04L1115.04 100.00L1110.04 112.00H593.78Z"/>
+<text x="851.91" y="104.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M1115.04 100.00L1119.03 88.00H1123.01L1127.00 100.00L1123.01 112.00H1119.03Z"/>
+<path class="bus" d="M218.00 143.00L223.00 131.00H583.78L588.78 143.00L583.78 155.00H223.00Z"/>
+<text x="403.39" y="147.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M588.78 143.00L593.78 131.00H1122.00L1127.00 143.00L1122.00 155.00H593.78Z"/>
+<text x="857.89" y="147.00" class="value" text-anchor="middle">0x0</text>
+<path class="trace" d="M218.00 197.00H385.45"/>
+<path class="edge" d="M385.45 197.00V175.00"/>
+<path class="trace" d="M385.45 175.00H1103.08"/>
+<path class="edge" d="M1103.08 175.00V197.00"/>
+<path class="trace" d="M1103.08 197.00H1127.00"/>
+<path class="trace" d="M218.00 240.00H1091.12"/>
+<path class="edge" d="M1091.12 240.00V218.00"/>
+<path class="trace" d="M1091.12 218.00H1115.04"/>
+<path class="edge" d="M1115.04 218.00V240.00"/>
+<path class="trace" d="M1115.04 240.00H1127.00"/>
+<path class="trace" d="M218.00 283.00H385.45"/>
+<path class="edge" d="M385.45 283.00V261.00"/>
+<path class="trace" d="M385.45 261.00H588.78"/>
+<path class="edge" d="M588.78 261.00V283.00"/>
+<path class="trace" d="M588.78 283.00H1127.00"/>
+<path class="trace" d="M218.00 326.00H361.53"/>
+<path class="edge" d="M361.53 326.00V304.00"/>
+<path class="trace" d="M361.53 304.00H457.21"/>
+<path class="edge" d="M457.21 304.00V326.00"/>
+<path class="trace" d="M457.21 326.00H552.89"/>
+<path class="edge" d="M552.89 326.00V304.00"/>
+<path class="trace" d="M552.89 304.00H576.82"/>
+<path class="edge" d="M576.82 304.00V326.00"/>
+<path class="trace" d="M576.82 326.00H816.03"/>
+<path class="edge" d="M816.03 326.00V304.00"/>
+<path class="trace" d="M816.03 304.00H887.79"/>
+<path class="edge" d="M887.79 304.00V326.00"/>
+<path class="trace" d="M887.79 326.00H1127.00"/>
+<path class="bus" d="M218.00 358.00L223.00 346.00H547.89L552.89 358.00L547.89 370.00H223.00Z"/>
+<text x="385.45" y="362.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M552.89 358.00L557.89 346.00H811.03L816.03 358.00L811.03 370.00H557.89Z"/>
+<text x="684.46" y="362.00" class="value" text-anchor="middle">0x1</text>
+<path class="bus" d="M816.03 358.00L821.03 346.00H1122.00L1127.00 358.00L1122.00 370.00H821.03Z"/>
+<text x="971.51" y="362.00" class="value" text-anchor="middle">0x2</text>
+<path class="bus" d="M218.00 401.00L223.00 389.00H500.05L505.05 401.00L500.05 413.00H223.00Z"/>
+<text x="361.53" y="405.00" class="value" text-anchor="middle">0x0</text>
+<path class="bus" d="M505.05 401.00L510.05 389.00H1002.39L1007.39 401.00L1002.39 413.00H510.05Z"/>
+<text x="756.22" y="405.00" class="value" text-anchor="middle">0x320</text>
+<path class="bus" d="M1007.39 401.00L1012.39 389.00H1122.00L1127.00 401.00L1122.00 413.00H1012.39Z"/>
+<text x="1067.20" y="405.00" class="value" text-anchor="middle">0x0</text>
+<text x="1127.00" y="476.00" class="axis" text-anchor="end">Time (ns)</text>
+</svg>

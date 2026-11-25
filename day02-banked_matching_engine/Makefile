@@ -21,20 +21,23 @@ RESERVE_BUILD := $(BUILD)/reserve
 RESERVE_SEED ?= 9253
 RESERVE_COMMANDS ?= 2400
 RESERVE_PROFILES := default odd tiny
+AUCTION_BANKED_RTL := $(shell cat rtl_auction_banked.f)
+AUCTION_BANKED_BUILD := $(BUILD)/auction-banked
 
 .PHONY: all test legacy-test unit regress lint synth route report clean
 .PHONY: reserve-test reserve-regress reserve-unit reserve-demo lint-reserve synth-reserve formal-reserve waveform-reserve
 .PHONY: manage-demo waveform-management
 .PHONY: auction-test auction-example auction-bridge auction-lint auction-synth formal-auction waveform-auction
+.PHONY: banked-auction-test banked-auction-lint banked-auction-synth formal-banked-auction waveform-banked-auction
 all: test
 
-test: legacy-test reserve-test auction-test
+test: legacy-test reserve-test auction-test banked-auction-test
 
 legacy-test: unit $(BUILD)/$(PROFILE)/engine.vvp
 	$(PYTHON) -B verify_matching.py run --profile $(PROFILE) --seed $(SEED) --commands $(COMMANDS) \
 		--vvp "$(VVP)" --sim $(BUILD)/$(PROFILE)/engine.vvp --build $(BUILD)/$(PROFILE)
 
-regress: reserve-regress auction-test
+regress: reserve-regress auction-test banked-auction-test
 	$(MAKE) legacy-test PROFILE=default SEED=7201
 	$(MAKE) legacy-test PROFILE=default SEED=39119
 	$(MAKE) legacy-test PROFILE=wide SEED=9109
@@ -59,10 +62,10 @@ $(BUILD)/transport.vvp: matching_fifo.sv matching_arbiter.sv tb_matching_transpo
 	mkdir -p $(dir $@)
 	$(IVERILOG) -g2012 -Wall -s tb_matching_transport -o $@ $^
 
-lint: lint-reserve auction-lint
+lint: lint-reserve auction-lint banked-auction-lint
 	$(VERILATOR) --lint-only -Wall --top-module $(TOP) -f rtl.f
 
-synth: synth-reserve auction-synth
+synth: synth-reserve auction-synth banked-auction-synth
 	mkdir -p $(BUILD)
 	$(YOSYS) -Q -l $(BUILD)/synth.log -p 'read_verilog -sv $(RTL); synth -top $(TOP); check -assert; stat; write_json $(BUILD)/$(TOP).json'
 
@@ -169,6 +172,41 @@ waveform-auction: ../scripts/render_vcd_waveform.py
 		--signal 'tb_call_auction_engine.m_second=Sell ID' \
 		--signal 'tb_call_auction_engine.m_quantity=Event quantity' \
 		--signal 'tb_call_auction_engine.m_last=Terminal event'
+
+banked-auction-test:
+	$(PYTHON) -B -m unittest -v test_banked_auction
+	$(PYTHON) -B banked_auction_verify.py --iverilog "$(IVERILOG)" --vvp "$(VVP)" --build $(AUCTION_BANKED_BUILD)
+	$(PYTHON) -B banked_auction_verify.py --pressure --iverilog "$(IVERILOG)" --vvp "$(VVP)" --build $(AUCTION_BANKED_BUILD)
+	$(PYTHON) -B banked_auction_verify.py --example --iverilog "$(IVERILOG)" --vvp "$(VVP)" --build $(AUCTION_BANKED_BUILD)
+
+banked-auction-lint:
+	$(VERILATOR) --lint-only -Wall --top-module banked_call_auction -f rtl_auction_banked.f
+
+banked-auction-synth:
+	mkdir -p $(AUCTION_BANKED_BUILD)
+	$(YOSYS) -Q -q -l $(AUCTION_BANKED_BUILD)/synth.log -p 'read_verilog -sv $(AUCTION_BANKED_RTL); synth -top banked_call_auction -noabc; check -assert; stat; write_json $(AUCTION_BANKED_BUILD)/netlist.json'
+	tail -n 24 $(AUCTION_BANKED_BUILD)/synth.log
+
+formal-banked-auction:
+	mkdir -p $(AUCTION_BANKED_BUILD)
+	cd formal && $(SBY) -f --prefix ../$(AUCTION_BANKED_BUILD)/formal banked_auction.sby
+
+waveform-banked-auction: ../scripts/render_vcd_waveform.py
+	$(PYTHON) -B banked_auction_verify.py --example --iverilog "$(IVERILOG)" --vvp "$(VVP)" \
+		--build $(AUCTION_BANKED_BUILD)/waveform --wave $(AUCTION_BANKED_BUILD)/waveform/cohort.vcd
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py $(AUCTION_BANKED_BUILD)/waveform/cohort.vcd docs/cohort_waveform.svg \
+		--start 165 --end 650 --title 'Day 02 · Scheduled two-instrument auction close' \
+		--signal 'tb_banked_call_auction.ctl_report_status=Control status' \
+		--signal 'tb_banked_call_auction.schedule_armed=Armed bank mask' \
+		--signal 'tb_banked_call_auction.schedule_due=Due bank mask' \
+		--signal 'tb_banked_call_auction.schedule_queued=Queued close mask' \
+		--signal 'tb_banked_call_auction.m_ready=Sink ready' \
+		--signal 'tb_banked_call_auction.m_valid=Event valid' \
+		--signal 'tb_banked_call_auction.m_bank=Event bank' \
+		--signal 'tb_banked_call_auction.m_scheduled=Automatic close event' \
+		--signal 'tb_banked_call_auction.event_kind=Event kind' \
+		--signal 'tb_banked_call_auction.m_wrapper_status=Wrapper status' \
+		--signal 'tb_banked_call_auction.event_last=Terminal event'
 
 route:
 	mkdir -p $(BUILD)

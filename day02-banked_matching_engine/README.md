@@ -8,6 +8,8 @@ The reserve top also supports [owner-scoped order management](docs/order_managem
 
 The [call-auction engine](docs/call_auction.md) handles collared opening and reopening crosses. Its checked handoff transfers eligible auction residuals into a continuous reserve book through a verified checkpoint.
 
+The [banked auction scheduler](docs/scheduled_auction.md) arms one deadline for a cohort of instruments, seals admission at the same clock tick across that cohort, and closes each book behind its accepted orders. The [cycle-checked waveform](docs/cohort_waveform.svg) shows independent clearing results under shared event backpressure.
+
 | Default hardware | Value |
 | --- | ---: |
 | Independent instruments | 3 |

@@ -9,3 +9,7 @@ eth_tx_path.sv
 eth_counter_bank.sv
 ethernet_udp_frontend.sv
 eth_config_csr.sv
+eth_arp_resolver.sv
+eth_arp_wire.sv
+eth_arp_endpoint.sv
+eth_ipv4_route.sv

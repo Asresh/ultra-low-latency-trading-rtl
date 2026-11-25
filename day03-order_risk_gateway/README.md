@@ -206,6 +206,14 @@ The independent oracle recomputes gross from live slot objects. The exact-match 
 
 `portfolio_journal.py seal` replays the simulator's input and observed pin records independently before linking them in a checksummed journal. `snapshot` validates the journal and produces an operator-readable state inventory. `export-stimulus` validates before recreating the complete normalized replay. The regression replays that exported capture through RTL and compares the resulting bytes. Fault tests cover altered receipts, rehashed false outcomes, insertion, tail truncation with a separately supplied terminal digest, and atomic output cleanup. Production recovery still needs an external durable recorder, authenticated checkpoint provenance, and a replay mode whose output is restricted from venue submission.
 
+## Optional supervised venue handoff
+
+[risk_venue_handoff.sv](risk_venue_handoff.sv) adds a separate boundary between reserved risk and venue dispatch. A stalled order that never transfers to the adapter can be revoked and rolled back when its venue lease closes. An order already handed to the adapter keeps its remaining reservation until a matching execution, terminal report, or cancel confirmation arrives. Each cancel attempt carries its own identifier, and retained venue reports can be replayed without double-applying exposure.
+
+- [Venue handoff interfaces, state transitions, and operating example](venue-handoff.md)
+- [Independent handoff model](venue_handoff_model.py) and [exact capture comparison](check_venue_handoff.py)
+- `make test-handoff lint-handoff synth-handoff formal-handoff handoff-waveform`
+
 ## Run the original gateway
 
 Use Icarus Verilog and Python 3 for the regression and audit reader. Use Verilator and Yosys for lint and synthesis.

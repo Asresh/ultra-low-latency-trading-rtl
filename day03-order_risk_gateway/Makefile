@@ -156,3 +156,59 @@ portfolio-waveform: build/portfolio-narrow.vvp
 		--signal '$(PORTFOLIO_TB).m_portfolio_reason=Cap reason' \
 		--signal '$(PORTFOLIO_TB).m_account_gross=Account open notional' \
 		--signal '$(PORTFOLIO_TB).m_firm_gross=Firm open notional'
+
+.PHONY: test-handoff lint-handoff synth-handoff formal-handoff handoff-waveform
+
+HANDOFF := risk_venue_handoff
+HANDOFF_TB := tb_risk_venue_handoff
+HANDOFF_RTL := $(PORTFOLIO_RTL) risk_venue_lease.sv risk_venue_history.sv risk_venue_handoff.sv
+HANDOFF_IMAGES := $(addprefix build/handoff-,$(addsuffix .vvp,$(PORTFOLIO_PROFILES)))
+HANDOFF_TESTS := $(addprefix test-handoff-,$(PORTFOLIO_PROFILES))
+HANDOFF_TRIALS ?= 125
+HANDOFF_OPTS_wide := -P$(HANDOFF_TB).PRICE_W=24 -P$(HANDOFF_TB).QTY_W=16 -P$(HANDOFF_TB).HISTORY=5
+HANDOFF_OPTS_singleton := -P$(HANDOFF_TB).NUM_ACCOUNTS=1 -P$(HANDOFF_TB).NUM_INSTRUMENTS=1 \
+	-P$(HANDOFF_TB).ORDER_SLOTS=1 -P$(HANDOFF_TB).VENUES=1 -P$(HANDOFF_TB).HISTORY=1 \
+	-P$(HANDOFF_TB).GEN_W=3 -P$(HANDOFF_TB).EVENT_W=4
+
+.PHONY: $(HANDOFF_TESTS)
+test: test-handoff
+lint: lint-handoff
+synth: synth-handoff
+waveform: handoff-waveform
+
+test-handoff: $(HANDOFF_TESTS)
+
+$(HANDOFF_TESTS): test-handoff-%: build/handoff-%.vvp
+	$(PYTHON) -B check_venue_handoff.py generate build/handoff-$* --profile $* --trials $(HANDOFF_TRIALS)
+	$(VVP) $< +vector_dir=build/handoff-$*
+	$(PYTHON) -B check_venue_handoff.py check build/handoff-$*
+
+$(HANDOFF_IMAGES): build/handoff-%.vvp: $(HANDOFF_RTL) $(HANDOFF_TB).sv | build
+	$(IVERILOG) -g2012 -s $(HANDOFF_TB) $(HANDOFF_OPTS_$*) -o $@ $^
+
+lint-handoff:
+	$(VERILATOR) --lint-only -Wall --top-module $(HANDOFF) $(HANDOFF_RTL)
+	$(VERILATOR) --lint-only -Wall --top-module $(HANDOFF) -Wno-CMPCONST -GNUM_ACCOUNTS=1 -GNUM_INSTRUMENTS=1 \
+		-GORDER_SLOTS=1 -GVENUES=1 -GHISTORY=1 $(HANDOFF_RTL)
+
+synth-handoff: | build
+	$(YOSYS) -Q -q -T -m slang -l build/handoff-synth.log -p 'read_slang --top $(HANDOFF) $(HANDOFF_RTL); synth -top $(HANDOFF) -noabc; check -assert; stat'
+
+formal-handoff: | build
+	$(YOSYS) -Q -q -T -m slang -l build/lease-formal.log -p 'read_slang --formal -D FORMAL --top risk_venue_lease -G VENUES=2 -G LEASE_W=3 -G TIMER_W=3 risk_venue_lease.sv; prep; memory_map; flatten; async2sync; chformal -lower; opt; sat -seq 12 -set-at 1 rst 1 -prove-asserts -verify'
+	$(YOSYS) -Q -q -T -m slang -l build/handoff-formal.log -p 'read_slang --formal -D FORMAL --top $(HANDOFF) -G NUM_ACCOUNTS=1 -G NUM_INSTRUMENTS=1 -G ORDER_SLOTS=1 -G VENUES=1 -G TAG_W=2 -G PRICE_W=3 -G QTY_W=3 -G GEN_W=2 -G EVENT_W=2 -G LEASE_W=2 -G TIMER_W=2 -G REPORT_W=2 -G MATCH_W=2 -G HISTORY=1 -G ACTION_W=2 $(HANDOFF_RTL); prep; memory_map; flatten; async2sync; chformal -lower; opt; sat -seq 15 -set-at 1 rst 1 -prove-asserts -verify'
+
+handoff-waveform: build/handoff-narrow.vvp
+	$(PYTHON) -B check_venue_handoff.py generate build/handoff-demo --demo
+	$(VVP) $< +vector_dir=build/handoff-demo +wave=build/handoff-demo/risk.vcd
+	$(PYTHON) -B check_venue_handoff.py check build/handoff-demo
+	$(PYTHON) -B ../scripts/render_vcd_waveform.py build/handoff-demo/risk.vcd handoff-waveform.svg \
+		--start 175 --end 555 --title 'Venue handoff revokes a never-transferred order and unwinds its reservation' \
+		--signal '$(HANDOFF_TB).link_loss=Link loss' \
+		--signal '$(HANDOFF_TB).venue_allowed=Venue allowed' \
+		--signal '$(HANDOFF_TB).tx_valid=Egress valid' \
+		--signal '$(HANDOFF_TB).tx_ready=Egress ready' \
+		--signal '$(HANDOFF_TB).tx_applicable=Egress applicable' \
+		--signal '$(HANDOFF_TB).m_valid=Audit valid' \
+		--signal '$(HANDOFF_TB).m_source=Audit source' \
+		--signal '$(HANDOFF_TB).ctl_m_gross=Last firm snapshot'
